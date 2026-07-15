@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <base href="/" />
   <title>maphaj — Angola</title>
+  <link rel="icon" type="image/jpeg" href="/assets/brand/favicon-64.jpg" />
+  <link rel="apple-touch-icon" href="/assets/brand/maphaj-logo.jpg" />
   <script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet" />
   <style>
@@ -984,15 +986,38 @@
     .maphaj-brand {
       position: absolute; z-index: 1; right: 12px; bottom: 12px;
       display: flex; align-items: center; gap: 8px;
-      padding: 6px 12px;
-      background: rgba(255, 255, 255, 0.92);
-      border-radius: 8px;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-      font-family: system-ui, sans-serif;
-      font-size: 13px; font-weight: 600; color: #111;
-      text-decoration: none; line-height: 1.2;
+      padding: 4px 8px 4px 4px;
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 10px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+      text-decoration: none; line-height: 0;
     }
-    .maphaj-brand span { font-weight: 400; color: #666; font-size: 12px; }
+    .maphaj-brand img {
+      display: block;
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
+      border-radius: 6px;
+    }
+    .maphaj-brand .brand-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      padding-right: 4px;
+      line-height: 1.15;
+    }
+    .maphaj-brand .brand-name {
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      color: #0b4ea2;
+    }
+    .maphaj-brand .brand-by {
+      font-family: system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 400;
+      color: #666;
+    }
     .maplibregl-ctrl-attrib,
     .maplibregl-ctrl-logo { display: none !important; }
 
@@ -1321,8 +1346,12 @@
     <div class="source" id="heatmapSourceLabel"></div>
   </div>
 
-  <a class="maphaj-brand" href="https://moveme.app" target="_blank" rel="noopener">
-    maphaj <span>by Moveme</span>
+  <a class="maphaj-brand" href="https://maphaj.appmoveme.com/" aria-label="maphaj">
+    <img src="/assets/brand/maphaj-logo.jpg" width="48" height="48" alt="maphaj" />
+    <span class="brand-meta">
+      <span class="brand-name">maphaj</span>
+      <span class="brand-by">by Moveme</span>
+    </span>
   </a>
 
   <script src="./config.local.js"></script>
