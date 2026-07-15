@@ -1,0 +1,2932 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>maphaj — Angola</title>
+  <script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #map { position: absolute; inset: 0; }
+
+    .ui {
+      position: absolute; z-index: 2; top: 12px; left: 12px; right: 60px;
+      display: flex; flex-direction: column; gap: 8px;
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 400px;
+      pointer-events: none;
+    }
+    .ui > * { pointer-events: auto; }
+
+    /* ── Modo pesquisa (default, estilo Google) ── */
+    .panel {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(60,64,67,.15), 0 1px 2px rgba(60,64,67,.3);
+      overflow: visible;
+      position: relative;
+    }
+
+    .search-mode .search-box {
+      display: flex; align-items: center; gap: 10px;
+      padding: 0 12px;
+      min-height: 48px;
+    }
+    .search-mode .search-box .icon { flex-shrink: 0; color: #5f6368; display: flex; }
+    .search-mode .place-input {
+      flex: 1; border: 0; outline: none; background: transparent;
+      font-size: 16px; padding: 14px 0; min-width: 0; color: #202124;
+    }
+    .search-mode .place-input::placeholder { color: #70757a; }
+
+    .search-clear, .search-directions-btn {
+      border: 0; background: transparent; cursor: pointer;
+      color: #5f6368; padding: 6px; border-radius: 50%;
+      display: none; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .search-clear:hover, .search-directions-btn:hover { background: #f1f3f4; }
+    .search-clear.visible { display: flex; }
+    .search-directions-btn.visible { display: flex; color: #1a73e8; }
+
+    .search-spinner {
+      width: 18px; height: 18px; border: 2px solid #dadce0;
+      border-top-color: #1a73e8; border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: none; flex-shrink: 0;
+    }
+    .search-spinner.visible { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .search { position: relative; }
+    .search-results {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: #fff; border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(60,64,67,.2);
+      max-height: 320px; overflow-y: auto;
+      display: none; z-index: 6;
+    }
+    .search-results.open { display: block; }
+    .search-results button {
+      display: flex; align-items: flex-start; gap: 12px;
+      width: 100%; text-align: left;
+      border: 0; background: transparent; cursor: pointer;
+      padding: 12px 14px; font-size: 14px; color: #202124;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    .search-results button:last-child { border-bottom: 0; }
+    .search-results button:hover,
+    .search-results button.active { background: #f8f9fa; }
+    .search-results .pin-ico {
+      flex-shrink: 0; margin-top: 2px; color: #70757a;
+    }
+    .search-results .place-name {
+      font-weight: 500; display: block; line-height: 1.3;
+    }
+    .search-results .place-meta {
+      font-size: 12px; color: #70757a; margin-top: 2px; line-height: 1.35;
+    }
+    .search-results .hint {
+      padding: 14px 16px; font-size: 13px; color: #70757a;
+    }
+
+    /* Card do lugar seleccionado (detalhes) */
+    .place-card {
+      display: none;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(60,64,67,.15), 0 1px 2px rgba(60,64,67,.3);
+      overflow: hidden;
+      max-height: min(52vh, 420px);
+      overflow-y: auto;
+    }
+    .place-card.visible { display: block; }
+    .place-card.dir-context .action-search-only { display: none !important; }
+    .place-card:not(.dir-context) .action-dir-only { display: none !important; }
+    .place-card-body {
+      padding: 14px 16px 12px;
+      border-top: 0;
+    }
+    .place-card-top {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .place-card-icon {
+      flex: 0 0 auto;
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      background: #e8f0fe;
+      color: #1a73e8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .place-card-icon svg { width: 26px; height: 26px; }
+    .place-card-main { flex: 1; min-width: 0; }
+    .place-card h2 {
+      margin: 0 0 4px;
+      font-size: 18px;
+      font-weight: 500;
+      color: #202124;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+    .place-card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 10px;
+      font-size: 13px;
+      color: #5f6368;
+      margin-bottom: 4px;
+    }
+    .place-card-rating {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: #3c4043;
+      font-weight: 500;
+    }
+    .place-card-stars {
+      color: #f4b400;
+      letter-spacing: -1px;
+      font-size: 12px;
+    }
+    .place-card-reviews {
+      color: #70757a;
+      font-weight: 400;
+    }
+    .place-card-category { color: #70757a; }
+    .place-card-status.open { color: #188038; font-weight: 500; }
+    .place-card-status.closed { color: #d93025; font-weight: 500; }
+    .place-card-address {
+      margin: 6px 0 0;
+      font-size: 13px;
+      color: #70757a;
+      line-height: 1.4;
+    }
+    .place-card-facts {
+      margin: 12px 0 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .place-card-facts li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 13px;
+      color: #3c4043;
+      line-height: 1.35;
+    }
+    .place-card-facts .fact-ico {
+      flex: 0 0 auto;
+      width: 20px;
+      color: #5f6368;
+      display: flex;
+      justify-content: center;
+      margin-top: 1px;
+    }
+    .place-card-facts a {
+      color: #1a73e8;
+      text-decoration: none;
+    }
+    .place-card-facts a:hover { text-decoration: underline; }
+    .place-card .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .place-card .actions button {
+      border: 0; border-radius: 20px; padding: 8px 16px;
+      font-size: 13px; font-weight: 500; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .place-card-loading {
+      display: none;
+      font-size: 12px;
+      color: #80868b;
+      padding: 0 16px 10px;
+    }
+    .place-card.loading .place-card-loading { display: block; }
+    .btn-directions {
+      background: #1a73e8; color: #fff;
+    }
+    .btn-directions:hover { background: #1765cc; }
+    .btn-ghost {
+      background: #f1f3f4; color: #3c4043;
+    }
+    .btn-ghost:hover { background: #e8eaed; }
+
+    /* ── Modo direções ── */
+    .directions-mode { display: none; }
+    .directions-mode.active { display: block; }
+    .search-mode.hidden { display: none; }
+
+    .dir-header {
+      display: flex; align-items: center; gap: 4px;
+      padding: 6px 8px 0;
+    }
+    .dir-header button {
+      border: 0; background: transparent; cursor: pointer;
+      width: 40px; height: 40px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      color: #5f6368;
+    }
+    .dir-header button:hover { background: #f1f3f4; }
+    .dir-header span {
+      font-size: 14px; font-weight: 500; color: #202124;
+    }
+
+    .trip-row {
+      position: relative;
+      display: flex; align-items: stretch;
+      border-bottom: 1px solid #e8eaed;
+      padding-right: 8px;
+    }
+    .trip-row:last-of-type { border-bottom: 0; }
+    .trip-dot {
+      width: 40px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+    }
+    .trip-dot span {
+      width: 10px; height: 10px; border-radius: 50%;
+      box-shadow: 0 0 0 2px currentColor;
+      background: #fff;
+    }
+    .trip-dot.origin { color: #34a853; }
+    .trip-dot.dest { color: #1a73e8; }
+    .trip-connector {
+      position: absolute; left: 19px; top: 30px; height: calc(100% - 4px);
+      width: 2px; background: #dadce0; pointer-events: none;
+    }
+
+    .directions-mode .search { flex: 1; min-width: 0; }
+    .directions-mode .search-box {
+      display: flex; align-items: center; gap: 6px;
+      min-height: 44px;
+    }
+    .directions-mode .place-input {
+      flex: 1; border: 0; outline: none; background: transparent;
+      font-size: 14px; padding: 10px 0; min-width: 0; color: #202124;
+    }
+    .directions-mode .search-results {
+      left: -40px;
+    }
+
+    .route-info {
+      display: none; align-items: center; gap: 12px;
+      padding: 10px 14px 8px; border-top: 1px solid #e8eaed;
+      font-size: 13px; color: #3c4043;
+    }
+    .route-info.visible { display: flex; flex-wrap: wrap; }
+    .route-info strong { font-size: 15px; color: #188038; }
+    .route-info .meta { flex: 1; min-width: 0; line-height: 1.35; }
+    .route-info .err { color: #d93025; }
+    .route-info .meta.err strong { color: #d93025; }
+    .btn-start-nav {
+      border: 0;
+      border-radius: 20px;
+      padding: 8px 14px;
+      background: #188038;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      font-family: inherit;
+    }
+    .btn-start-nav.visible { display: inline-flex; }
+    .btn-start-nav:hover { background: #137333; }
+    .btn-start-nav:disabled {
+      opacity: 0.55;
+      cursor: default;
+    }
+
+    /* Painel navegação estilo Google Maps */
+    .nav-overlay {
+      display: none;
+      position: absolute;
+      z-index: 4;
+      inset: 0;
+      pointer-events: none;
+      font-family: 'Google Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    .nav-overlay.active { display: block; }
+    .nav-overlay > * { pointer-events: auto; }
+    body.nav-active .ui,
+    body.nav-active .map-settings-btn,
+    body.nav-active .map-settings-panel,
+    body.nav-active .maphaj-brand,
+    body.nav-active .maplibregl-ctrl-top-right,
+    body.nav-active .maplibregl-ctrl-bottom-left {
+      display: none !important;
+    }
+    /* Durante navegação: só Me.png é a posição (esconde dot nativo MapLibre) */
+    body.nav-active .maplibregl-user-location-dot,
+    body.nav-active .maplibregl-user-location-show-heading .maplibregl-user-location-heading,
+    body.nav-active .maplibregl-user-location-accuracy-circle,
+    body.nav-active .maphaj-marker-start {
+      display: none !important;
+    }
+
+    .nav-top {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      top: 12px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+    .nav-banner {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      background: #1a73e8;
+      color: #fff;
+      border-radius: 16px;
+      padding: 16px 18px;
+      box-shadow: 0 2px 6px rgba(60,64,67,.28), 0 8px 24px rgba(26,115,232,.28);
+      min-height: 88px;
+    }
+    .nav-banner.off-route { background: #f9ab00; color: #202124; }
+    .nav-banner.off-route .nav-banner-ico { background: rgba(0,0,0,.12); color: #202124; }
+    .nav-banner.arrived { background: #188038; }
+    .nav-banner-ico {
+      flex: 0 0 auto;
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+    .nav-banner-ico .route-maneuver-svg {
+      width: 36px;
+      height: 36px;
+    }
+    .nav-banner-main { flex: 1; min-width: 0; }
+    .nav-dist {
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1.05;
+      letter-spacing: -0.5px;
+    }
+    .nav-instruction {
+      font-size: 18px;
+      font-weight: 500;
+      margin-top: 6px;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .nav-secondary {
+      font-size: 13px;
+      opacity: 0.9;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .nav-secondary:empty { display: none; }
+
+    .nav-bottom {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 16px;
+      max-width: 520px;
+      margin: 0 auto;
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .nav-eta-sheet {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      gap: 4px;
+      background: #fff;
+      border-radius: 28px;
+      padding: 12px 8px;
+      box-shadow: 0 2px 8px rgba(60,64,67,.28), 0 1px 2px rgba(60,64,67,.18);
+      min-width: 0;
+    }
+    .nav-eta-cell {
+      flex: 1;
+      text-align: center;
+      min-width: 0;
+      padding: 0 4px;
+    }
+    .nav-eta-cell .v {
+      font-size: 18px;
+      font-weight: 700;
+      color: #188038;
+      line-height: 1.15;
+    }
+    .nav-eta-cell .v.muted { color: #202124; }
+    .nav-eta-cell .l {
+      font-size: 11px;
+      color: #5f6368;
+      margin-top: 2px;
+      font-weight: 500;
+    }
+    .btn-stop-nav {
+      width: 56px;
+      height: 56px;
+      border: 0;
+      border-radius: 50%;
+      background: #d93025;
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(217,48,37,.4);
+      flex-shrink: 0;
+      align-self: center;
+    }
+    .btn-stop-nav:hover { background: #c5221f; }
+    .btn-stop-nav svg { display: block; }
+
+    .btn-nav-recenter {
+      display: none;
+      position: absolute;
+      right: 12px;
+      bottom: 90px;
+      border: 0;
+      border-radius: 24px;
+      padding: 10px 16px;
+      background: #fff;
+      color: #1a73e8;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(60,64,67,.28);
+      align-items: center;
+      gap: 8px;
+      font-family: inherit;
+    }
+    .btn-nav-recenter.visible { display: inline-flex; }
+
+    .btn-nav-voice {
+      position: absolute;
+      left: 12px;
+      bottom: 90px;
+      width: 44px;
+      height: 44px;
+      border: 0;
+      border-radius: 50%;
+      background: #fff;
+      color: #5f6368;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(60,64,67,.28);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn-nav-voice.muted { color: #d93025; }
+
+    .nav-speed {
+      display: none;
+      position: absolute;
+      left: 12px;
+      bottom: 148px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(60,64,67,.28);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .nav-speed.visible { display: flex; }
+    .nav-speed .n {
+      font-size: 18px;
+      font-weight: 700;
+      color: #202124;
+      line-height: 1;
+    }
+    .nav-speed .u {
+      font-size: 10px;
+      color: #5f6368;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    .nav-puck {
+      width: 56px;
+      height: 56px;
+      position: relative;
+      pointer-events: none;
+    }
+    .nav-puck img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    .route-options {
+      display: none;
+      gap: 8px;
+      padding: 0 12px 12px;
+      overflow-x: auto;
+      border-top: 0;
+    }
+    .route-options.visible {
+      display: flex;
+      border-top: 1px solid #e8eaed;
+      padding-top: 10px;
+    }
+    .route-option {
+      flex: 0 0 auto;
+      min-width: 108px;
+      border: 1px solid #dadce0;
+      border-radius: 10px;
+      background: #fff;
+      padding: 8px 10px;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .route-option:hover { background: #f8f9fa; }
+    .route-option.selected {
+      border-color: #1a73e8;
+      background: #e8f0fe;
+      box-shadow: inset 0 0 0 1px #1a73e8;
+    }
+    .route-option .t {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: #188038;
+    }
+    .route-option.selected .t { color: #1a73e8; }
+    .route-option .d {
+      display: block;
+      font-size: 12px;
+      color: #5f6368;
+      margin-top: 2px;
+    }
+    .route-option .s {
+      display: block;
+      font-size: 11px;
+      color: #80868b;
+      margin-top: 2px;
+      max-width: 140px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Modos de transporte (Carro / Moto / A pé / …) */
+    .travel-modes {
+      display: flex;
+      gap: 6px;
+      padding: 10px 12px 4px;
+      overflow-x: auto;
+      border-top: 1px solid #e8eaed;
+      -webkit-overflow-scrolling: touch;
+    }
+    .travel-mode {
+      flex: 1 0 auto;
+      min-width: 64px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      padding: 8px 6px 6px;
+      cursor: pointer;
+      color: #5f6368;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.15;
+    }
+    .travel-mode:hover {
+      background: #f1f3f4;
+    }
+    .travel-mode.active {
+      background: #e8f0fe;
+      border-color: #1a73e8;
+      color: #1a73e8;
+    }
+    .travel-mode svg {
+      width: 24px;
+      height: 24px;
+      display: block;
+    }
+    .travel-mode .tm-eta {
+      font-size: 10px;
+      color: #80868b;
+      font-weight: 400;
+      min-height: 12px;
+    }
+    .travel-mode.active .tm-eta {
+      color: #1a73e8;
+    }
+
+    /* Hover polyline estilo Google Maps */
+    .route-hover-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      border: 3px solid #1a73e8;
+      box-shadow: 0 1px 4px rgba(0,0,0,.35);
+      pointer-events: none;
+    }
+    .route-hover-tooltip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 5;
+      pointer-events: none;
+      will-change: transform;
+    }
+    .route-hover-tooltip-inner {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(60,64,67,.28), 0 1px 2px rgba(60,64,67,.2);
+      padding: 8px 12px;
+      min-width: 110px;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .route-hover-tooltip-inner .rht-time {
+      font-size: 15px;
+      font-weight: 600;
+      color: #188038;
+      line-height: 1.2;
+    }
+    .route-hover-tooltip-inner .rht-dist {
+      font-size: 13px;
+      color: #3c4043;
+      margin-top: 2px;
+    }
+    .route-hover-tooltip-inner .rht-along {
+      font-size: 11px;
+      color: #1a73e8;
+      margin-top: 4px;
+    }
+    .route-hover-tooltip-inner .rht-sum {
+      font-size: 12px;
+      color: #3c4043;
+      font-weight: 500;
+      margin-top: 4px;
+      max-width: 200px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Tooltip de manobra (hover nas setas da rota) */
+    .route-maneuver-tooltip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 6;
+      pointer-events: none;
+      will-change: transform;
+    }
+    .route-maneuver-tooltip-inner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(60,64,67,.28), 0 1px 2px rgba(60,64,67,.2);
+      padding: 10px 12px;
+      max-width: 280px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      line-height: 1.35;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .route-maneuver-tip-ico {
+      flex: 0 0 auto;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #1a73e8;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .route-maneuver-tip-ico .route-maneuver-svg {
+      width: 22px;
+      height: 22px;
+    }
+    .route-maneuver-tip-txt {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .route-maneuver-svg {
+      display: block;
+      overflow: visible;
+    }
+
+    .bar {
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .bar button, .bar select {
+      border: 0; border-radius: 8px; padding: 8px 12px;
+      background: #f1f3f4; color: #3c4043;
+      cursor: pointer; font-size: 13px;
+      box-shadow: none;
+    }
+    .bar button:hover { background: #e8eaed; }
+    .bar button.active { background: #e8f0fe; color: #1a73e8; font-weight: 600; }
+
+    /* Botão configurações (só ícone) */
+    .map-settings-btn {
+      position: absolute;
+      z-index: 3;
+      left: 12px;
+      bottom: 12px;
+      width: 44px;
+      height: 44px;
+      border: 0;
+      border-radius: 50%;
+      background: #fff;
+      color: #3c4043;
+      box-shadow: 0 1px 4px rgba(0,0,0,.3);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .map-settings-btn:hover { background: #f8f9fa; }
+    .map-settings-btn[aria-expanded="true"] {
+      background: #e8f0fe;
+      color: #1a73e8;
+    }
+    .map-settings-btn svg { width: 22px; height: 22px; display: block; }
+
+    .map-settings-panel {
+      position: absolute;
+      z-index: 3;
+      left: 12px;
+      bottom: 64px;
+      width: min(300px, calc(100vw - 24px));
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(60,64,67,.28), 0 1px 3px rgba(60,64,67,.2);
+      font-family: system-ui, -apple-system, sans-serif;
+      display: none;
+      overflow: hidden;
+    }
+    .map-settings-panel.open { display: block; }
+    .map-settings-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid #e8eaed;
+    }
+    .map-settings-header strong {
+      font-size: 14px;
+      font-weight: 600;
+      color: #202124;
+    }
+    .map-settings-close {
+      border: 0;
+      background: transparent;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      color: #5f6368;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .map-settings-close:hover { background: #f1f3f4; }
+    .map-settings-section {
+      padding: 12px 14px 14px;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    .map-settings-section:last-child { border-bottom: 0; }
+    .map-settings-section h3 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #80868b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .heatmap-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .heatmap-toggle-row span {
+      font-size: 14px;
+      color: #202124;
+      font-weight: 500;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .heatmap-switch {
+      position: relative;
+      width: 44px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+    .heatmap-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .heatmap-switch .slider {
+      position: absolute;
+      inset: 0;
+      background: #dadce0;
+      border-radius: 26px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .heatmap-switch .slider::before {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      left: 3px;
+      top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,.25);
+    }
+    .heatmap-switch input:checked + .slider { background: #1a73e8; }
+    .heatmap-switch input:checked + .slider::before { transform: translateX(18px); }
+    .heatmap-hint {
+      margin: 8px 0 0;
+      font-size: 12px;
+      color: #80868b;
+      line-height: 1.35;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 400;
+    }
+    .heatmap-toggle-row.disabled {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .heatmap-switch input:disabled + .slider {
+      cursor: default;
+      opacity: 0.7;
+    }
+
+    .heatmap-legend {
+      display: none;
+      position: absolute;
+      z-index: 3;
+      left: 12px;
+      bottom: 72px;
+      background: #fff;
+      border-radius: 10px;
+      padding: 10px 12px;
+      box-shadow: 0 2px 8px rgba(60,64,67,.25);
+      font-family: system-ui, -apple-system, sans-serif;
+      min-width: 148px;
+      pointer-events: none;
+    }
+    .heatmap-legend.visible { display: block; }
+    body.nav-active .heatmap-legend { display: none !important; }
+    .heatmap-legend .title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #5f6368;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .heatmap-legend .bar {
+      height: 10px;
+      border-radius: 5px;
+      background: linear-gradient(
+        90deg,
+        #276EF1 0%,
+        #48C0F0 28%,
+        #FFC043 55%,
+        #FF7A00 78%,
+        #E11900 100%
+      );
+    }
+    .heatmap-legend .labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+      font-size: 10px;
+      color: #80868b;
+      font-weight: 500;
+    }
+    .heatmap-legend .source {
+      margin-top: 6px;
+      font-size: 10px;
+      color: #9aa0a6;
+    }
+
+    /* Tipo de mapa (dentro das definições) */
+    .map-type {
+      display: flex;
+      gap: 0;
+      background: #f1f3f4;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .map-type button {
+      flex: 1;
+      border: 0;
+      background: transparent;
+      color: #3c4043;
+      padding: 10px 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .map-type button:hover { background: #e8eaed; }
+    .map-type button.active {
+      background: #fff;
+      color: #1a73e8;
+      font-weight: 600;
+      box-shadow: 0 0 0 1px #dadce0 inset;
+    }
+
+    .maphaj-brand {
+      position: absolute; z-index: 1; right: 12px; bottom: 12px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.92);
+      border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+      font-family: system-ui, sans-serif;
+      font-size: 13px; font-weight: 600; color: #111;
+      text-decoration: none; line-height: 1.2;
+    }
+    .maphaj-brand span { font-weight: 400; color: #666; font-size: 12px; }
+    .maplibregl-ctrl-attrib,
+    .maplibregl-ctrl-logo { display: none !important; }
+
+    .maphaj-marker {
+      width: 26px; height: 26px;
+      border: 3px solid #fff;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 6px rgba(0,0,0,.35);
+    }
+    .maphaj-marker.place { background: #ea4335; }
+    .maphaj-marker.dest { background: #ea4335; }
+
+    /* Marcador de início / pesquisa — pin azul com haste */
+    .maphaj-marker-start {
+      position: relative;
+      width: 40px;
+      height: 52px;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      display: block;
+      pointer-events: none;
+      line-height: 0;
+      overflow: visible;
+    }
+    .maphaj-marker-start svg {
+      width: 40px;
+      height: 52px;
+      display: block;
+      overflow: visible;
+    }
+
+    /* Marcador de destino — círculo Moveme */
+    .maphaj-marker-dest {
+      position: relative;
+      width: 28px;
+      height: 28px;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      display: block;
+      pointer-events: none;
+      line-height: 0;
+      overflow: visible;
+    }
+    .maphaj-marker-dest svg {
+      width: 28px;
+      height: 28px;
+      display: block;
+      overflow: visible;
+    }
+
+    /* Cartões "De" / "Para" ao lado dos pins (estilo Uber) */
+    .route-pin-card {
+      position: absolute;
+      left: calc(100% + 6px);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      max-width: 200px;
+      padding: 7px 8px 7px 11px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: #111;
+      line-height: 1.25;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .maphaj-marker-start .route-pin-card {
+      top: 10px;
+    }
+    .maphaj-marker-dest .route-pin-card {
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    .route-pin-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .route-pin-chevron {
+      flex-shrink: 0;
+      color: #757575;
+      font-weight: 400;
+      font-size: 15px;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="ui">
+    <!-- DEFAULT: pesquisa única estilo Google -->
+    <div class="panel search-mode" id="searchMode">
+      <div class="search" id="mainSearch">
+        <div class="search-box">
+          <span class="icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+            </svg>
+          </span>
+          <input
+            class="place-input"
+            type="search"
+            placeholder="Pesquisar no maphaj"
+            autocomplete="off"
+            enterkeyhint="search"
+            aria-label="Pesquisar locais"
+          />
+          <div class="search-spinner" aria-hidden="true"></div>
+          <button type="button" class="search-clear" title="Limpar" aria-label="Limpar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+        <div class="search-results" role="listbox" aria-label="Sugestões"></div>
+      </div>
+    </div>
+
+    <!-- Detalhes do lugar (pesquisa + clique no mapa em direções) -->
+    <div class="panel place-card" id="placeCard">
+        <div class="place-card-body">
+          <div class="place-card-top">
+            <div class="place-card-icon" id="placeCardIcon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+            </div>
+            <div class="place-card-main">
+              <h2 id="placeCardTitle"></h2>
+              <div class="place-card-meta" id="placeCardMeta"></div>
+              <p class="place-card-address" id="placeCardAddress"></p>
+            </div>
+          </div>
+          <ul class="place-card-facts" id="placeCardFacts"></ul>
+          <div class="actions">
+            <button type="button" class="btn-directions action-search-only" id="btnDirections">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71 11.29l-9-9a.996.996 0 0 0-1.41 0l-9 9a.996.996 0 0 0 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a.996.996 0 0 0 0-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>
+              Direções
+            </button>
+            <button type="button" class="btn-directions action-dir-only" id="btnUseAsDest">
+              Usar como destino
+            </button>
+            <button type="button" class="btn-ghost action-dir-only" id="btnUseAsOrigin">
+              Usar como origem
+            </button>
+            <button type="button" class="btn-ghost" id="btnCopyPlace" title="Copiar morada">Copiar</button>
+            <button type="button" class="btn-ghost" id="btnClearPlace">Fechar</button>
+          </div>
+        </div>
+        <div class="place-card-loading" id="placeCardLoading">A obter detalhes…</div>
+    </div>
+
+    <!-- Direções (só após pedir) -->
+    <div class="panel directions-mode" id="directionsMode">
+      <div class="dir-header">
+        <button type="button" id="btnBackSearch" title="Voltar" aria-label="Voltar à pesquisa">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
+        <span>Direções</span>
+      </div>
+      <div class="trip-row origin">
+        <div class="trip-dot origin">
+          <div class="trip-connector" aria-hidden="true"></div>
+          <span></span>
+        </div>
+        <div class="search" id="originSearch">
+          <div class="search-box">
+            <input class="place-input" type="search" placeholder="A sua localização" autocomplete="off" />
+            <div class="search-spinner" aria-hidden="true"></div>
+            <button type="button" class="search-clear" title="Limpar" aria-label="Limpar">×</button>
+          </div>
+          <div class="search-results" role="listbox"></div>
+        </div>
+      </div>
+      <div class="trip-row dest">
+        <div class="trip-dot dest"><span></span></div>
+        <div class="search" id="destSearch">
+          <div class="search-box">
+            <input class="place-input" type="search" placeholder="Escolher destino" autocomplete="off" />
+            <div class="search-spinner" aria-hidden="true"></div>
+            <button type="button" class="search-clear" title="Limpar" aria-label="Limpar">×</button>
+          </div>
+          <div class="search-results" role="listbox"></div>
+        </div>
+      </div>
+      <div class="travel-modes" id="travelModes" role="tablist" aria-label="Modo de transporte">
+        <button type="button" class="travel-mode active" role="tab" data-mode="driving" data-label="Carro" aria-selected="true" title="Carro">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+          <span>Carro</span>
+          <span class="tm-eta" data-eta></span>
+        </button>
+        <button type="button" class="travel-mode" role="tab" data-mode="motorcycle" data-label="Moto" aria-selected="false" title="Moto">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.44 9.03 15.41 5H11v2h3.59l2 2H5c-2.8 0-5 2.2-5 5s2.2 5 5 5c2.46 0 4.45-1.69 4.9-4h1.65l2.67-2.67c.22-.21.5-.33.8-.33h1.04c.67 1.2 1.95 2 3.44 2 2.21 0 4-1.79 4-4s-1.79-4-4-4c-.89 0-1.69.3-2.35.8zM7.82 15C7.4 16.15 6.28 17 5 17c-1.63 0-3-1.37-3-3s1.37-3 3-3c1.28 0 2.4.85 2.82 2H5v2h2.82zM19 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z"/></svg>
+          <span>Moto</span>
+          <span class="tm-eta" data-eta></span>
+        </button>
+        <button type="button" class="travel-mode" role="tab" data-mode="walking" data-label="A pé" aria-selected="false" title="A pé">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9 7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6l1.8-.7"/></svg>
+          <span>A pé</span>
+          <span class="tm-eta" data-eta></span>
+        </button>
+        <button type="button" class="travel-mode" role="tab" data-mode="bicycling" data-label="Bicicleta" aria-selected="false" title="Bicicleta">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm5.8-10 2.4-2.4.8.8c1.3 1.3 3 2.1 5.1 2.1V9c-1.5 0-2.7-.6-3.6-1.5l-1.9-1.9c-.5-.4-1-.6-1.6-.6s-1.1.2-1.4.6L7.8 8.4c-.4.3-.6.8-.6 1.3 0 .6.2 1.1.6 1.4L11 14v5h2v-6.2l-2.2-2.3zM19 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5z"/></svg>
+          <span>Bicicleta</span>
+          <span class="tm-eta" data-eta></span>
+        </button>
+        <button type="button" class="travel-mode" role="tab" data-mode="transit" data-label="Transportes" aria-selected="false" title="Transportes">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c-4 0-8 .5-8 4v9.5C4 17.43 5.57 19 7.5 19L6 20.5v.5h2.23l2-2H14l2 2h2v-.5L16.5 19c1.93 0 3.5-1.57 3.5-3.5V6c0-3.5-3.58-4-8-4zM7.5 17c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm3.5-6H6V6h5v5zm2 0V6h5v5h-5zm3.5 6c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+          <span>Transportes</span>
+          <span class="tm-eta" data-eta></span>
+        </button>
+      </div>
+      <div class="route-info" id="routeInfo">
+        <div class="meta" id="routeMeta"></div>
+        <button type="button" class="btn-start-nav" id="btnStartNav" title="Iniciar navegação">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+          Navegar
+        </button>
+      </div>
+      <div class="route-options" id="routeOptions" aria-label="Rotas alternativas"></div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="nav-overlay" id="navOverlay" aria-live="polite">
+    <div class="nav-top">
+      <div class="nav-banner" id="navBanner">
+        <div class="nav-banner-ico" id="navBannerIco"></div>
+        <div class="nav-banner-main">
+          <div class="nav-dist" id="navDist">—</div>
+          <div class="nav-instruction" id="navInstruction">—</div>
+          <div class="nav-secondary" id="navSecondary"></div>
+        </div>
+      </div>
+    </div>
+    <div class="nav-speed" id="navSpeed" aria-hidden="true">
+      <span class="n" id="navSpeedVal">0</span>
+      <span class="u">km/h</span>
+    </div>
+    <button type="button" class="btn-nav-voice" id="btnNavVoice" title="Som das instruções" aria-pressed="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+    </button>
+    <button type="button" class="btn-nav-recenter" id="btnNavRecenter">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+      Recentrar
+    </button>
+    <div class="nav-bottom">
+      <div class="nav-eta-sheet">
+        <div class="nav-eta-cell">
+          <div class="v" id="navRemainTime">—</div>
+          <div class="l">restante</div>
+        </div>
+        <div class="nav-eta-cell">
+          <div class="v muted" id="navRemainDist">—</div>
+          <div class="l">distância</div>
+        </div>
+        <div class="nav-eta-cell">
+          <div class="v muted" id="navArrivalTime">—</div>
+          <div class="l">chegada</div>
+        </div>
+      </div>
+      <button type="button" class="btn-stop-nav" id="btnStopNav" title="Sair da navegação" aria-label="Sair da navegação">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <button type="button" class="map-settings-btn" id="btnMapSettings" aria-label="Configurações do mapa" aria-expanded="false" aria-controls="mapSettingsPanel" title="Configurações">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+  </button>
+
+  <div class="map-settings-panel" id="mapSettingsPanel" role="dialog" aria-label="Configurações do mapa" hidden>
+    <div class="map-settings-header">
+      <strong>Configurações do mapa</strong>
+      <button type="button" class="map-settings-close" id="btnCloseMapSettings" aria-label="Fechar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </button>
+    </div>
+    <div class="map-settings-section">
+      <h3>Tipo de mapa</h3>
+      <div class="map-type" id="mapTypeControl" role="group" aria-label="Tipo de mapa">
+        <button type="button" data-basemap="map" class="active">Mapa</button>
+        <button type="button" data-basemap="satellite">Satélite</button>
+        <button type="button" data-basemap="hybrid">Híbrido</button>
+      </div>
+    </div>
+    <div class="map-settings-section">
+      <h3>Mapa de calor</h3>
+      <div class="heatmap-toggle-row">
+        <span>Procura / surge</span>
+        <label class="heatmap-switch" title="Mostrar mapa de calor">
+          <input type="checkbox" id="toggleHeatmap" />
+          <span class="slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="heatmap-toggle-row" style="margin-top: 12px;">
+        <span>Dados mockados</span>
+        <label class="heatmap-switch" title="Usar dados de exemplo em vez da API">
+          <input type="checkbox" id="toggleHeatmapMock" />
+          <span class="slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <p class="heatmap-hint">Zonas quentes = maior procura. Azul → vermelho. Com mock, os dados são simulados à volta do mapa.</p>
+    </div>
+    <div class="map-settings-section">
+      <h3>Ir para</h3>
+      <div class="bar">
+        <button type="button" data-center="13.2344,-8.8383" data-zoom="12">Luanda</button>
+        <button type="button" data-center="13.4073,-12.5763" data-zoom="12">Benguela</button>
+        <button type="button" data-center="13.5360,-12.3642" data-zoom="12">Lobito</button>
+        <button type="button" data-center="15.7393,-12.7761" data-zoom="12">Huambo</button>
+        <button type="button" data-center="13.4925,-14.9177" data-zoom="12">Lubango</button>
+        <button type="button" data-center="16.3410,-9.5402" data-zoom="11">Malanje</button>
+        <button type="button" data-center="12.2000,-5.5500" data-zoom="11">Cabinda</button>
+        <button type="button" id="btnPais">País</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="heatmap-legend" id="heatmapLegend" aria-hidden="true">
+    <div class="title">Procura · hex</div>
+    <div class="bar"></div>
+    <div class="labels"><span>Baixa</span><span>Alta</span></div>
+    <div class="source" id="heatmapSourceLabel"></div>
+  </div>
+
+  <a class="maphaj-brand" href="https://moveme.app" target="_blank" rel="noopener">
+    maphaj <span>by Moveme</span>
+  </a>
+
+  <script src="./config.local.js"></script>
+  <script type="module">
+    import { loadPlacesConfig, hasAuth } from './js/places-config.js';
+    import { PlacesSearchClient } from './js/places-client.js';
+    import { bindPlaceSearchField } from './js/place-search-field.js';
+    import { DirectionsClient } from './js/directions-client.js';
+    import { RouteLayer } from './js/route-layer.js';
+    import { formatDistance, formatDuration } from './js/polyline.js';
+    import { getBasemapStyle } from './js/basemap-styles.js';
+    import { HeatmapClient } from './js/heatmap-client.js';
+    import { HeatmapLayer } from './js/heatmap-layer.js';
+    import {
+      categoryLabel,
+      formatDistanceKm,
+      formatPriceLevel,
+      formatRating,
+      haversineKm,
+      mergePlace,
+      openingStatus,
+      starsHtml
+    } from './js/place-details-card.js';
+    import { hasValidCoords } from './js/places-model.js';
+    import { NavigationController } from './js/navigation-controller.js';
+    import { maneuverIconSvg } from './js/route-maneuvers.js';
+
+    const config = loadPlacesConfig();
+    const placesClient = new PlacesSearchClient(config);
+    const directionsClient = new DirectionsClient(config);
+    const heatmapClient = new HeatmapClient(config);
+
+    const ANGOLA_BOUNDS = [[11.4, -18.1], [24.1, -4.3]];
+
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: getBasemapStyle('map'),
+      center: [13.2344, -8.8383],
+      zoom: 11,
+      pitch: 0,
+      bearing: 0,
+      maxPitch: 85,
+      attributionControl: false,
+      maxBounds: [[8.0, -20.5], [27.5, -2.0]]
+    });
+    map.addControl(
+      new maplibregl.AttributionControl({ compact: true }),
+      'bottom-right'
+    );
+    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }));
+    const geolocate = new maplibregl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true },
+      trackUserLocation: true
+    });
+    map.addControl(geolocate);
+
+    const routeLayer = new RouteLayer(map, {
+      reverseGeocode: async ({ lat, lng, signal }) => {
+        try {
+          const place = await placesClient.fromCoordinates({
+            lat,
+            lng,
+            maxResults: 1,
+            signal
+          });
+          if (!place) return null;
+          // Preferir nome curto da via; morada completa como fallback
+          return place.name || place.address || null;
+        } catch (err) {
+          if (err?.name === 'AbortError') throw err;
+          console.warn('[maphaj] reverse geocode:', err);
+          return null;
+        }
+      }
+    });
+    const heatmapLayer = new HeatmapLayer(map);
+    const heatmapLegendEl = document.getElementById('heatmapLegend');
+    const heatmapSourceLabel = document.getElementById('heatmapSourceLabel');
+    const toggleHeatmapEl = document.getElementById('toggleHeatmap');
+    const toggleHeatmapMockEl = document.getElementById('toggleHeatmapMock');
+    let heatmapEnabled = false;
+    let heatmapUseMock = false;
+    let heatmapAbort = null;
+    let heatmapRefreshTimer = null;
+    /** Última área/dados aplicados — só muda quando vierem dados novos */
+    let heatmapLastKey = '';
+    let heatmapLastFingerprint = '';
+    let heatmapHasData = false;
+
+    function heatPointsFingerprint(points) {
+      return (points || [])
+        .map(
+          (p) =>
+            `${p.zoneId || ''}:${Number(p.lat).toFixed(4)},${Number(p.lng).toFixed(4)}:${Number(p.weight || 0).toFixed(2)}`
+        )
+        .join('|');
+    }
+
+    function syncHeatmapMockUi() {
+      toggleHeatmapMockEl.disabled = !heatmapEnabled;
+      toggleHeatmapMockEl.closest('.heatmap-toggle-row')?.classList.toggle(
+        'disabled',
+        !heatmapEnabled
+      );
+    }
+
+    /**
+     * @param {{ force?: boolean }} [opts]
+     */
+    async function refreshHeatmap(opts = {}) {
+      if (!heatmapEnabled || navigation?.active) return;
+      const force = Boolean(opts.force);
+      const c = map.getCenter();
+      const zoom = map.getZoom();
+      const radiusKm = Math.max(
+        4,
+        Math.min(25, Math.round(40 / Math.max(1, zoom - 8)))
+      );
+      const areaKey =
+        `${c.lat.toFixed(2)},${c.lng.toFixed(2)},${radiusKm}` +
+        (heatmapUseMock ? '|mock' : '');
+
+      if (!force && areaKey === heatmapLastKey && heatmapHasData) return;
+
+      if (heatmapAbort) heatmapAbort.abort();
+      heatmapAbort = new AbortController();
+      try {
+        const result = await heatmapClient.getHeatPoints({
+          lat: c.lat,
+          lng: c.lng,
+          radiusKm,
+          signal: heatmapAbort.signal,
+          forceMock: heatmapUseMock,
+          allowDemo: heatmapUseMock || force || !heatmapHasData
+        });
+
+        if (!result || !result.points?.length) return;
+
+        const fp = heatPointsFingerprint(result.points);
+        if (
+          !force &&
+          heatmapHasData &&
+          result.key === heatmapLastKey &&
+          fp === heatmapLastFingerprint
+        ) {
+          return;
+        }
+
+        heatmapLayer.setPoints(result.points);
+        heatmapLayer.setEnabled(true);
+        heatmapLastKey = result.key || areaKey;
+        heatmapLastFingerprint = fp;
+        heatmapHasData = true;
+        heatmapLegendEl.classList.add('visible');
+        heatmapLegendEl.setAttribute('aria-hidden', 'false');
+        if (result.source === 'mock') {
+          heatmapSourceLabel.textContent = 'Dados mockados';
+        } else if (result.source === 'api' || result.source === 'cache') {
+          heatmapSourceLabel.textContent = 'Dados ao vivo (pricing-zones)';
+        } else {
+          heatmapSourceLabel.textContent = 'Demo (API indisponível)';
+        }
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        console.warn('[maphaj] heatmap:', err);
+      }
+    }
+
+    function setHeatmapEnabled(on) {
+      heatmapEnabled = Boolean(on);
+      toggleHeatmapEl.checked = heatmapEnabled;
+      syncHeatmapMockUi();
+      if (!heatmapEnabled) {
+        if (heatmapAbort) heatmapAbort.abort();
+        heatmapLayer.setEnabled(false);
+        heatmapLegendEl.classList.remove('visible');
+        heatmapLegendEl.setAttribute('aria-hidden', 'true');
+        heatmapSourceLabel.textContent = '';
+        heatmapLastKey = '';
+        heatmapLastFingerprint = '';
+        heatmapHasData = false;
+        return;
+      }
+      void refreshHeatmap({ force: true });
+    }
+
+    function setHeatmapMock(on) {
+      heatmapUseMock = Boolean(on);
+      toggleHeatmapMockEl.checked = heatmapUseMock;
+      heatmapLastKey = '';
+      heatmapLastFingerprint = '';
+      if (heatmapEnabled) {
+        void refreshHeatmap({ force: true });
+      }
+    }
+
+    toggleHeatmapEl.addEventListener('change', () => {
+      setHeatmapEnabled(toggleHeatmapEl.checked);
+    });
+    toggleHeatmapMockEl.addEventListener('change', () => {
+      setHeatmapMock(toggleHeatmapMockEl.checked);
+    });
+    syncHeatmapMockUi();
+
+    map.on('moveend', () => {
+      if (!heatmapEnabled || navigation?.active) return;
+      clearTimeout(heatmapRefreshTimer);
+      heatmapRefreshTimer = setTimeout(() => {
+        void refreshHeatmap({ force: false });
+      }, 450);
+    });
+
+    const searchMode = document.getElementById('searchMode');
+    const directionsMode = document.getElementById('directionsMode');
+    const placeCard = document.getElementById('placeCard');
+    const routeInfoEl = document.getElementById('routeInfo');
+    const routeMetaEl = document.getElementById('routeMeta');
+    const routeOptionsEl = document.getElementById('routeOptions');
+    const travelModesEl = document.getElementById('travelModes');
+    const btnStartNav = document.getElementById('btnStartNav');
+    const btnStopNav = document.getElementById('btnStopNav');
+    const btnNavRecenter = document.getElementById('btnNavRecenter');
+    const btnNavVoice = document.getElementById('btnNavVoice');
+    const navOverlay = document.getElementById('navOverlay');
+    const navBanner = document.getElementById('navBanner');
+    const navBannerIco = document.getElementById('navBannerIco');
+    const navDist = document.getElementById('navDist');
+    const navInstruction = document.getElementById('navInstruction');
+    const navSecondary = document.getElementById('navSecondary');
+    const navRemainTime = document.getElementById('navRemainTime');
+    const navRemainDist = document.getElementById('navRemainDist');
+    const navArrivalTime = document.getElementById('navArrivalTime');
+    const navSpeed = document.getElementById('navSpeed');
+    const navSpeedVal = document.getElementById('navSpeedVal');
+
+    let navRecalcBusy = false;
+    let navVoiceOn = true;
+    /** Escondeu o pin de origem ao entrar em navegação */
+    let originPinHiddenForNav = false;
+    /** @type {NavigationController|null} */
+    let navigation = null;
+
+    function setStartNavVisible(visible) {
+      btnStartNav.classList.toggle(
+        'visible',
+        Boolean(visible) && !navigation?.active
+      );
+    }
+
+    /**
+     * Navegação: remove pin de start; mantém só destino + Me.png (GPS).
+     * Ao sair: restaura o pin de origem.
+     */
+    function setNavigationPins(navOn) {
+      if (navOn) {
+        if (originMarker) {
+          originMarker.remove();
+          originMarker = null;
+        }
+        originPinHiddenForNav = true;
+        const dest = destField?.getSelected?.();
+        if (dest && hasValidCoords(dest)) {
+          setRoutePin('dest', dest);
+        }
+        return;
+      }
+      if (originPinHiddenForNav) {
+        originPinHiddenForNav = false;
+        const origin = originField?.getSelected?.();
+        if (origin && hasValidCoords(origin)) {
+          setRoutePin('origin', origin);
+        }
+      }
+    }
+
+    function setNavChrome(active) {
+      document.body.classList.toggle('nav-active', active);
+      navOverlay.classList.toggle('active', active);
+      if (!active) {
+        navBanner.classList.remove('off-route', 'arrived');
+        btnNavRecenter.classList.remove('visible');
+        navSpeed.classList.remove('visible');
+        routeLayer.setNavigationMode(false);
+        setNavigationPins(false);
+        setStartNavVisible(Boolean(routeLayer.getSelectedRoute()?.coordinates));
+        if (heatmapEnabled) {
+          heatmapLayer.setEnabled(true);
+          heatmapLegendEl.classList.add('visible');
+        }
+      } else {
+        setStartNavVisible(false);
+        routeLayer.setNavigationMode(true);
+        setNavigationPins(true);
+        heatmapLayer.setEnabled(false);
+        heatmapLegendEl.classList.remove('visible');
+      }
+    }
+
+    function updateNavHud(state) {
+      if (!state?.active) {
+        setNavChrome(false);
+        return;
+      }
+      if (state.keepHud && state.following === false) {
+        btnNavRecenter.classList.add('visible');
+        return;
+      }
+      setNavChrome(true);
+      navBanner.classList.toggle('off-route', Boolean(state.offRoute));
+      navBanner.classList.toggle('arrived', Boolean(state.arrived));
+      navDist.textContent = state.arrived
+        ? 'Chegou'
+        : state.distanceToManeuverText || '—';
+      navInstruction.textContent =
+        state.instruction || state.error || 'A navegar…';
+      navSecondary.textContent = state.secondary || '';
+      navRemainTime.textContent = state.remainingDurationText || '—';
+      navRemainDist.textContent = state.remainingDistanceText || '—';
+      navArrivalTime.textContent = state.arrivalTimeText || '—';
+      if (state.iconHtml) {
+        navBannerIco.innerHTML = state.iconHtml;
+      } else if (state.type) {
+        navBannerIco.innerHTML = maneuverIconSvg(state.type);
+      }
+      btnNavRecenter.classList.toggle('visible', state.following === false);
+      if (state.speedKmh != null && state.speedKmh > 0) {
+        navSpeed.classList.add('visible');
+        navSpeedVal.textContent = String(state.speedKmh);
+      } else {
+        navSpeed.classList.remove('visible');
+      }
+    }
+
+    async function reverseGeocodeStreet({ lat, lng, signal }) {
+      try {
+        const place = await placesClient.fromCoordinates({
+          lat,
+          lng,
+          maxResults: 1,
+          signal
+        });
+        if (!place) return null;
+        return place.name || place.address || null;
+      } catch (err) {
+        if (err?.name === 'AbortError') throw err;
+        console.warn('[maphaj] reverse geocode:', err);
+        return null;
+      }
+    }
+
+    navigation = new NavigationController({
+      map,
+      reverseGeocode: reverseGeocodeStreet,
+      voiceEnabled: true,
+      onUpdate: (state) => updateNavHud(state),
+      onFollowChange: (following) => {
+        btnNavRecenter.classList.toggle('visible', !following);
+      },
+      onProgress: (p) => {
+        routeLayer.setNavigationProgress(p);
+      },
+      onArrived: () => {
+        navBanner.classList.add('arrived');
+        navInstruction.textContent = 'Chegou ao destino';
+        navSecondary.textContent = '';
+      },
+      onOffRoute: (pos) => {
+        void recalculateNavigationRoute(pos);
+      }
+    });
+
+    async function recalculateNavigationRoute(pos) {
+      if (navRecalcBusy || !navigation?.active) return;
+      const dest = destField.getSelected();
+      if (!dest || !hasValidCoords(dest)) return;
+
+      navRecalcBusy = true;
+      try {
+        const origin = myLocationPlace(pos);
+        if (!origin) return;
+        originIsMyLocation = true;
+        originField.setPlace(origin);
+        setRoutePin('origin', origin);
+
+        const route = await directionsClient.getRoute(
+          { lat: origin.lat, lng: origin.lng },
+          { lat: dest.lat, lng: dest.lng },
+          {
+            alternatives: true,
+            mode: getApiTravelMode(travelMode)
+          }
+        );
+        if (!navigation.active) return;
+
+        const routes =
+          route.routes?.length > 0
+            ? route.routes
+            : [
+                {
+                  coordinates: route.coordinates,
+                  primary: true,
+                  index: 0,
+                  distanceMeters: route.distanceMeters,
+                  durationSeconds: route.durationSeconds,
+                  summary: route.summary,
+                  raw: route.raw
+                }
+              ];
+
+        lastRoutes = routes;
+        const selectedIndex = Math.max(
+          0,
+          routes.findIndex((r) => r.primary)
+        );
+        const idx = selectedIndex < 0 ? 0 : selectedIndex;
+        routeLayer.setRoutes(routes, { selectedIndex: idx, fit: false });
+        applySelectedRoute(idx);
+        const selected = routes[idx];
+        await navigation.setRoute({
+          coordinates: selected.coordinates,
+          distanceMeters: selected.distanceMeters,
+          durationSeconds: selected.durationSeconds,
+          raw: selected.raw || route.raw
+        });
+      } catch (err) {
+        console.warn('[maphaj] nav recalc:', err);
+        updateNavHud({
+          active: true,
+          offRoute: true,
+          instruction: 'Não foi possível recalcular a rota',
+          type: 'continue',
+          distanceToManeuverText: '—',
+          remainingDistanceText: '—',
+          remainingDurationText: '—'
+        });
+      } finally {
+        navRecalcBusy = false;
+      }
+    }
+
+    /** @type {'driving'|'motorcycle'|'walking'|'bicycling'|'transit'} */
+    let travelMode = 'driving';
+
+    function getApiTravelMode(uiMode) {
+      // API Moveme: driving | walking | bicycling | transit (+ motorcycle no GraphHopper)
+      return uiMode || 'driving';
+    }
+
+    function setTravelMode(mode) {
+      travelMode = mode;
+      travelModesEl.querySelectorAll('.travel-mode').forEach((btn) => {
+        const on = btn.dataset.mode === mode;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    }
+
+    function updateTravelModeEta(durationSeconds) {
+      travelModesEl.querySelectorAll('.travel-mode').forEach((btn) => {
+        const eta = btn.querySelector('[data-eta]');
+        if (!eta) return;
+        if (btn.dataset.mode === travelMode && durationSeconds != null) {
+          eta.textContent = formatDuration(durationSeconds);
+        } else if (btn.dataset.mode !== travelMode) {
+          // mantém vazio até haver pedido por modo; limpa outros
+          eta.textContent = '';
+        }
+      });
+      const activeEta = travelModesEl.querySelector(
+        `.travel-mode[data-mode="${travelMode}"] [data-eta]`
+      );
+      if (activeEta && durationSeconds != null) {
+        activeEta.textContent = formatDuration(durationSeconds);
+      }
+    }
+
+    travelModesEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.travel-mode');
+      if (!btn || !travelModesEl.contains(btn)) return;
+      const mode = btn.dataset.mode;
+      if (!mode || mode === travelMode) return;
+      setTravelMode(mode);
+      void maybeDrawRoute();
+    });
+
+    let placeMarker = null;
+    /** Marker temporário ao clicar no mapa em modo direções */
+    let mapPickMarker = null;
+    let mapClickAbort = null;
+    let mapClickGen = 0;
+    let originMarker = null;
+    let destMarker = null;
+    let selectedPlace = null;
+    /** Lugar da pesquisa ao entrar em direções (para restaurar ao voltar) */
+    let directionsResumePlace = null;
+    /** @type {Array<object>|null} */
+    let lastRoutes = null;
+    let userLocation = null;
+    let userLocationAccurate = false;
+    let routeAbort = null;
+    let routeGen = 0;
+    /** true se a origem actual é "A sua localização" (actualiza com GPS) */
+    let originIsMyLocation = false;
+
+    geolocate.on('geolocate', (e) => {
+      userLocation = { lat: e.coords.latitude, lng: e.coords.longitude };
+      userLocationAccurate = true;
+      // Em navegação o Me.png é a posição — não recolocar pin de origem
+      if (navigation?.active) return;
+      if (originIsMyLocation && directionsMode.classList.contains('active')) {
+        const place = myLocationPlace();
+        originField.setPlace(place);
+        setRoutePin('origin', place);
+        void maybeDrawRoute();
+      }
+    });
+
+    geolocate.on('error', (err) => {
+      console.warn('[maphaj] Geolocalização:', err?.message || err);
+    });
+
+    /**
+     * Pede GPS real. Não usa o centro do mapa como "posição actual".
+     * @returns {Promise<{lat:number,lng:number}|null>}
+     */
+    function requestUserLocation({ timeoutMs = 12000 } = {}) {
+      return new Promise((resolve) => {
+        if (!navigator.geolocation) {
+          resolve(null);
+          return;
+        }
+
+        let settled = false;
+        const done = (pos) => {
+          if (settled) return;
+          settled = true;
+          resolve(pos);
+        };
+
+        // Tenta via controlo do MapLibre (mostra o ponto azul no mapa)
+        try {
+          geolocate.once('geolocate', (e) => {
+            done({
+              lat: e.coords.latitude,
+              lng: e.coords.longitude
+            });
+          });
+          geolocate.once('error', () => {
+            // fallback abaixo via API nativa se ainda não settle
+          });
+          geolocate.trigger();
+        } catch (err) {
+          console.warn('[maphaj] geolocate.trigger falhou:', err);
+        }
+
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const loc = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude
+            };
+            userLocation = loc;
+            userLocationAccurate = true;
+            done(loc);
+          },
+          (err) => {
+            console.warn('[maphaj] getCurrentPosition:', err.message);
+            // se o controlo MapLibre já resolveu, ignore
+            setTimeout(() => {
+              if (!settled) done(userLocationAccurate ? userLocation : null);
+            }, 400);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: timeoutMs,
+            maximumAge: 30_000
+          }
+        );
+
+        setTimeout(() => {
+          if (!settled) done(userLocationAccurate ? userLocation : null);
+        }, timeoutMs + 500);
+      });
+    }
+
+    const mapSettingsBtn = document.getElementById('btnMapSettings');
+    const mapSettingsPanel = document.getElementById('mapSettingsPanel');
+
+    function setMapSettingsOpen(open) {
+      mapSettingsPanel.classList.toggle('open', open);
+      mapSettingsPanel.hidden = !open;
+      mapSettingsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    mapSettingsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setMapSettingsOpen(!mapSettingsPanel.classList.contains('open'));
+    });
+    document.getElementById('btnCloseMapSettings').addEventListener('click', () => {
+      setMapSettingsOpen(false);
+    });
+    document.addEventListener('click', (e) => {
+      if (!mapSettingsPanel.classList.contains('open')) return;
+      if (
+        e.target.closest?.(
+          '#mapSettingsPanel, #btnMapSettings'
+        )
+      ) {
+        return;
+      }
+      setMapSettingsOpen(false);
+    });
+
+    document.querySelectorAll('#mapTypeControl button[data-basemap]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.basemap;
+        if (btn.classList.contains('active')) return;
+        document
+          .querySelectorAll('#mapTypeControl button[data-basemap]')
+          .forEach((b) => b.classList.toggle('active', b === btn));
+
+        // Preservar rota + selecção antes do setStyle limpar as layers
+        const preserved =
+          (lastRoutes && lastRoutes.length
+            ? lastRoutes
+            : routeLayer.getRoutes()) || [];
+        const selectedIndex = routeLayer.getSelectedIndex();
+        if (preserved.length) lastRoutes = preserved;
+
+        const origin = originField.getSelected();
+        const dest = destField.getSelected();
+
+        map.once('style.load', () => {
+          const restore = () => {
+            if (preserved.length) {
+              lastRoutes = preserved;
+              routeLayer.setRoutes(preserved, {
+                fit: false,
+                selectedIndex
+              });
+              applySelectedRoute(
+                Math.max(0, Math.min(selectedIndex, preserved.length - 1))
+              );
+            }
+            // Pins HTML: reaplicar para garantir após troca de estilo
+            if (origin) setRoutePin('origin', origin);
+            if (dest) setRoutePin('dest', dest);
+            else if (selectedPlace && !directionsMode.classList.contains('active')) {
+              // marker do lugar em modo pesquisa
+              if (placeMarker) {
+                placeMarker.remove();
+                placeMarker = null;
+              }
+              placeMarker = new maplibregl.Marker({
+                element: makeStartPinElement(),
+                anchor: 'bottom'
+              })
+                .setLngLat([selectedPlace.lng, selectedPlace.lat])
+                .addTo(map);
+            }
+          };
+          if (map.isStyleLoaded()) queueMicrotask(restore);
+          else map.once('idle', restore);
+        });
+
+        map.setStyle(getBasemapStyle(id), { diff: false });
+      });
+    });
+
+    function setActive(btn) {
+      document.querySelectorAll('.bar button[data-center]').forEach((b) => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+    }
+
+    document.querySelectorAll('.bar button[data-center]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const [lng, lat] = btn.dataset.center.split(',').map(Number);
+        map.flyTo({ center: [lng, lat], zoom: Number(btn.dataset.zoom) });
+        setActive(btn);
+        setMapSettingsOpen(false);
+      });
+    });
+
+    document.getElementById('btnPais').onclick = () => {
+      map.fitBounds(ANGOLA_BOUNDS, { padding: 40, duration: 1200 });
+      setActive(null);
+      setMapSettingsOpen(false);
+    };
+    setActive(document.querySelector('.bar button[data-center="13.2344,-8.8383"]'));
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    let pinSeq = 0;
+
+    function routePinCardHtml(prefix, label) {
+      return `
+        <span class="route-pin-card">
+          <span class="route-pin-text">${escapeHtml(prefix)} ${escapeHtml(label)}</span>
+          <span class="route-pin-chevron" aria-hidden="true">›</span>
+        </span>`;
+    }
+
+    function makeStartPinElement(label) {
+      const id = `mh${++pinSeq}`;
+      const wrap = document.createElement('div');
+      wrap.className = 'maphaj-marker-start';
+      // SVG nítido: sem filter CSS, sombra hard no SVG, contraste alto
+      wrap.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 104" width="40" height="52" aria-hidden="true" shape-rendering="geometricPrecision">
+          <defs>
+            <linearGradient id="${id}Head" x1="20%" y1="10%" x2="80%" y2="90%">
+              <stop offset="0%" stop-color="#4A9BFF"/>
+              <stop offset="55%" stop-color="#1A73E8"/>
+              <stop offset="100%" stop-color="#0D47C4"/>
+            </linearGradient>
+            <linearGradient id="${id}Stem" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#1A73E8"/>
+              <stop offset="100%" stop-color="#0A3A9E"/>
+            </linearGradient>
+          </defs>
+          <!-- sombra no chão (opaca, sem blur) -->
+          <ellipse cx="40" cy="98" rx="10" ry="3" fill="#000" fill-opacity="0.22"/>
+          <!-- haste -->
+          <rect x="37" y="56" width="6" height="40" rx="2" fill="url(#${id}Stem)"/>
+          <!-- cabeça -->
+          <circle cx="40" cy="34" r="26" fill="url(#${id}Head)"/>
+          <!-- reflexo nítido -->
+          <path d="M26 22a16 16 0 0 1 18-8" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"/>
+          <!-- núcleo branco -->
+          <circle cx="40" cy="34" r="10" fill="#fff"/>
+          <!-- base da haste -->
+          <circle cx="40" cy="97" r="2.5" fill="#1A1A1A"/>
+        </svg>`;
+      if (label) wrap.insertAdjacentHTML('beforeend', routePinCardHtml('De', label));
+      return wrap;
+    }
+
+    function makeDestPinElement(label) {
+      const wrap = document.createElement('div');
+      wrap.className = 'maphaj-marker-dest';
+      wrap.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="28" height="28" aria-hidden="true" shape-rendering="geometricPrecision">
+          <circle cx="32" cy="32" r="28" fill="#1A73E8"/>
+          <circle cx="32" cy="32" r="10" fill="#FFFFFF"/>
+        </svg>`;
+      if (label) wrap.insertAdjacentHTML('beforeend', routePinCardHtml('Para', label));
+      return wrap;
+    }
+
+    function shortPinLabel(place) {
+      if (!place) return 'Local';
+      let n = String(place.name || '').trim();
+      if (!n || /^sua localiza/i.test(n) || /^a sua localiza/i.test(n) || /^my location/i.test(n)) {
+        n = String(place.address || '').split(',')[0].trim();
+      }
+      if (!n) n = String(place.address || '').split(',')[0].trim();
+      if (n.length > 28) n = `${n.slice(0, 26).trim()}…`;
+      return n || 'Local';
+    }
+
+    function makeMarker(kind, place) {
+      // Origem / início / lugar seleccionado → pin Moveme com haste (+ cartão "De" em direções)
+      if (kind === 'origin' || kind === 'start') {
+        return new maplibregl.Marker({
+          element: makeStartPinElement(shortPinLabel(place)),
+          anchor: 'bottom',
+          offset: [0, 2]
+        });
+      }
+
+      if (kind === 'place') {
+        return new maplibregl.Marker({
+          element: makeStartPinElement(),
+          anchor: 'bottom',
+          offset: [0, 2]
+        });
+      }
+
+      // Destino → círculo Moveme + cartão "Para"
+      if (kind === 'dest') {
+        return new maplibregl.Marker({
+          element: makeDestPinElement(shortPinLabel(place)),
+          anchor: 'center'
+        });
+      }
+
+      const el = document.createElement('div');
+      el.className = `maphaj-marker ${kind}`;
+      return new maplibregl.Marker({ element: el, anchor: 'bottom' });
+    }
+
+    function setPlacePin(place) {
+      if (placeMarker) placeMarker.remove();
+      placeMarker = null;
+      if (!place) return;
+      placeMarker = makeMarker('place')
+        .setLngLat([place.lng, place.lat])
+        .setPopup(
+          new maplibregl.Popup({ offset: 16 }).setText(
+            place.address ? `${place.name} — ${place.address}` : place.name
+          )
+        )
+        .addTo(map);
+      map.flyTo({ center: [place.lng, place.lat], zoom: 15, essential: true });
+      setActive(null);
+    }
+
+    function setRoutePin(kind, place) {
+      // Em navegação nunca mostrar pin de start (origem)
+      if (kind === 'origin' && navigation?.active) {
+        if (originMarker) {
+          originMarker.remove();
+          originMarker = null;
+        }
+        return;
+      }
+      const existing = kind === 'origin' ? originMarker : destMarker;
+      if (existing) existing.remove();
+      if (!place) {
+        if (kind === 'origin') originMarker = null;
+        else destMarker = null;
+        return;
+      }
+      const marker = makeMarker(kind, place)
+        .setLngLat([place.lng, place.lat])
+        .addTo(map);
+      if (kind === 'origin') originMarker = marker;
+      else destMarker = marker;
+    }
+
+    function escapeAttr(s) {
+      return escapeHtml(s).replace(/'/g, '&#39;');
+    }
+
+    let placeCardGen = 0;
+
+    function renderPlaceCard(place) {
+      document.getElementById('placeCardTitle').textContent = place.name || '';
+
+      const metaEl = document.getElementById('placeCardMeta');
+      const metaParts = [];
+      const ratingInfo = formatRating(place.rating, place.userRatings);
+      if (ratingInfo) {
+        metaParts.push(
+          `<span class="place-card-rating">` +
+            `<span>${escapeHtml(ratingInfo.text)}</span>` +
+            `<span class="place-card-stars" aria-hidden="true">${starsHtml(ratingInfo.value)}</span>` +
+            (ratingInfo.countText
+              ? `<span class="place-card-reviews">(${escapeHtml(ratingInfo.countText)})</span>`
+              : '') +
+            `</span>`
+        );
+      }
+      metaParts.push(
+        `<span class="place-card-category">${escapeHtml(categoryLabel(place.types))}</span>`
+      );
+      const status = openingStatus(place.openingHours);
+      if (status) {
+        metaParts.push(
+          `<span class="place-card-status ${status.open ? 'open' : 'closed'}">${escapeHtml(status.text)}</span>`
+        );
+      }
+      const price = formatPriceLevel(place.priceLevel);
+      if (price) metaParts.push(`<span>${escapeHtml(price)}</span>`);
+      metaEl.innerHTML = metaParts.join('<span aria-hidden="true">·</span>');
+
+      document.getElementById('placeCardAddress').textContent =
+        place.address || place.vicinity || place.subtitle || '';
+
+      const facts = [];
+      const bias = getBias();
+      const distKm = haversineKm(bias, place);
+      const distLabel = formatDistanceKm(distKm);
+      const icoPin =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
+      const icoPhone =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
+      const icoLink =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>';
+      const icoCoord =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>';
+
+      if (distLabel) {
+        facts.push({
+          ico: icoPin,
+          html: `<span>${escapeHtml(distLabel)} da sua posição no mapa</span>`
+        });
+      }
+      if (place.phone) {
+        const tel = String(place.phone).replace(/\s+/g, '');
+        facts.push({
+          ico: icoPhone,
+          html: `<a href="tel:${escapeAttr(tel)}">${escapeHtml(place.phone)}</a>`
+        });
+      }
+      if (place.website) {
+        let href = String(place.website);
+        if (!/^https?:\/\//i.test(href)) href = `https://${href}`;
+        facts.push({
+          ico: icoLink,
+          html: `<a href="${escapeAttr(href)}" target="_blank" rel="noopener">Website</a>`
+        });
+      }
+      if (place.lat != null && place.lng != null) {
+        facts.push({
+          ico: icoCoord,
+          html: `<span>${place.lat.toFixed(5)}, ${place.lng.toFixed(5)}</span>`
+        });
+      }
+
+      document.getElementById('placeCardFacts').innerHTML = facts
+        .map(
+          (f) =>
+            `<li><span class="fact-ico" aria-hidden="true">${f.ico}</span><div>${f.html}</div></li>`
+        )
+        .join('');
+    }
+
+    async function showPlaceCard(place, { fromMap = false } = {}) {
+      selectedPlace = place;
+      const inDirections = directionsMode.classList.contains('active');
+      placeCard.classList.toggle('dir-context', inDirections || fromMap);
+      placeCard.classList.add('visible');
+      renderPlaceCard(place);
+
+      const gen = ++placeCardGen;
+      // Tenta enriquecer via /api/places/details quando houver placeId
+      if (!place?.placeId || place.placeId === 'my-location' || String(place.placeId).startsWith('map-')) {
+        placeCard.classList.remove('loading');
+        return;
+      }
+
+      placeCard.classList.add('loading');
+      try {
+        const detailed = await placesClient.details(place.placeId);
+        if (gen !== placeCardGen) return;
+        if (detailed) {
+          const merged = mergePlace(place, detailed);
+          if (!hasValidCoords(merged) && hasValidCoords(place)) {
+            merged.lat = place.lat;
+            merged.lng = place.lng;
+          }
+          selectedPlace = merged;
+          renderPlaceCard(merged);
+        }
+      } catch (err) {
+        console.warn('[maphaj] place details:', err);
+      } finally {
+        if (gen === placeCardGen) placeCard.classList.remove('loading');
+      }
+    }
+
+    function hidePlaceCard({ keepSelected = false } = {}) {
+      placeCardGen += 1;
+      if (!keepSelected) selectedPlace = null;
+      placeCard.classList.remove('visible', 'loading', 'dir-context');
+      if (mapPickMarker) {
+        mapPickMarker.remove();
+        mapPickMarker = null;
+      }
+    }
+
+    function clearMapPickMarker() {
+      if (mapPickMarker) {
+        mapPickMarker.remove();
+        mapPickMarker = null;
+      }
+    }
+
+    function setMapPickPin(place) {
+      clearMapPickMarker();
+      if (!place || place.lat == null || place.lng == null) return;
+      mapPickMarker = new maplibregl.Marker({
+        element: makeStartPinElement(),
+        anchor: 'bottom'
+      })
+        .setLngLat([place.lng, place.lat])
+        .addTo(map);
+    }
+
+    /** Extrai nome de um symbol/POI do estilo (OpenMapTiles). */
+    function placeFromMapFeature(feature, lngLat) {
+      const p = feature?.properties || {};
+      const name =
+        p['name:pt'] ||
+        p.name ||
+        p.name_en ||
+        p['name:en'] ||
+        null;
+      if (!name) return null;
+      const className = p.class || p.subclass || p.type || 'point_of_interest';
+      return {
+        placeId: `map-${String(name).slice(0, 40)}-${lngLat.lat.toFixed(5)}-${lngLat.lng.toFixed(5)}`,
+        name: String(name),
+        address: '',
+        lat: lngLat.lat,
+        lng: lngLat.lng,
+        types: [String(className)],
+        source: 'map'
+      };
+    }
+
+    function queryMapPlaceFeature(point, clickLngLat) {
+      const style = map.getStyle();
+      if (!style?.layers) return null;
+      const layerIds = style.layers
+        .filter(
+          (l) =>
+            l.type === 'symbol' &&
+            (String(l.id).includes('poi') ||
+              String(l.id).includes('place') ||
+              String(l.id).includes('label'))
+        )
+        .map((l) => l.id)
+        .filter((id) => map.getLayer(id));
+      if (!layerIds.length) return null;
+      const feats = map.queryRenderedFeatures(point, { layers: layerIds });
+      for (const f of feats) {
+        const coords =
+          f.geometry?.type === 'Point' ? f.geometry.coordinates : null;
+        const lngLat = coords
+          ? { lng: coords[0], lat: coords[1] }
+          : clickLngLat;
+        if (!lngLat) continue;
+        const place = placeFromMapFeature(f, lngLat);
+        if (place) return place;
+      }
+      return null;
+    }
+
+    async function openPlaceFromMapClick(e) {
+      if (!directionsMode.classList.contains('active')) return;
+      if (navigation?.active) return;
+      // Ignorar cliques em controlos / UI HTML
+      if (e.originalEvent?.target?.closest?.('.ui, .map-settings-btn, .map-settings-panel, .maplibregl-ctrl, .maphaj-brand, .maphaj-marker-start, .maphaj-marker-dest, .route-maneuver-dot, .nav-overlay, .nav-puck')) {
+        return;
+      }
+
+      // Não abrir detalhes ao clicar na polyline / manobras
+      const routeLayerIds = [
+        'maphaj-route-main-hit',
+        'maphaj-route-alt-hit',
+        'maphaj-route-line',
+        'maphaj-route-casing',
+        'maphaj-route-alt-line',
+        'maphaj-route-maneuvers',
+        'maphaj-route-maneuvers-hit',
+        'maphaj-route-arrows'
+      ].filter((id) => map.getLayer(id));
+      if (routeLayerIds.length) {
+        const onRoute = map.queryRenderedFeatures(e.point, {
+          layers: routeLayerIds
+        });
+        if (onRoute.length) return;
+      }
+
+      const lngLat = e.lngLat;
+      const gen = ++mapClickGen;
+      if (mapClickAbort) mapClickAbort.abort();
+      mapClickAbort = new AbortController();
+
+      let place = queryMapPlaceFeature(e.point, {
+        lng: lngLat.lng,
+        lat: lngLat.lat
+      });
+      if (place) {
+        place = { ...place, lat: lngLat.lat, lng: lngLat.lng };
+      }
+
+      placeCard.classList.add('visible', 'dir-context', 'loading');
+      document.getElementById('placeCardTitle').textContent = 'A obter local…';
+      document.getElementById('placeCardMeta').innerHTML = '';
+      document.getElementById('placeCardAddress').textContent = '';
+      document.getElementById('placeCardFacts').innerHTML = '';
+
+      try {
+        const fromApi = await placesClient.fromCoordinates({
+          lat: lngLat.lat,
+          lng: lngLat.lng,
+          maxResults: 1,
+          signal: mapClickAbort.signal
+        });
+        if (gen !== mapClickGen) return;
+
+        if (fromApi && hasValidCoords(fromApi)) {
+          place = place
+            ? mergePlace(
+                {
+                  ...place,
+                  lat: fromApi.lat ?? place.lat,
+                  lng: fromApi.lng ?? place.lng
+                },
+                fromApi
+              )
+            : fromApi;
+        } else if (!place) {
+          place = {
+            placeId: `map-coord-${lngLat.lat.toFixed(5)}-${lngLat.lng.toFixed(5)}`,
+            name: 'Local no mapa',
+            address: `${lngLat.lat.toFixed(5)}, ${lngLat.lng.toFixed(5)}`,
+            lat: lngLat.lat,
+            lng: lngLat.lng,
+            types: ['point_of_interest'],
+            source: 'map'
+          };
+        } else if (!place.address && fromApi?.address) {
+          place.address = fromApi.address;
+        }
+
+        // Manter o ponto clicado (precisão do toque)
+        place.lat = lngLat.lat;
+        place.lng = lngLat.lng;
+
+        setMapPickPin(place);
+        await showPlaceCard(place, { fromMap: true });
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        console.warn('[maphaj] map click place:', err);
+        if (gen !== mapClickGen) return;
+        if (place) {
+          setMapPickPin(place);
+          await showPlaceCard(place, { fromMap: true });
+        } else {
+          placeCard.classList.remove('loading');
+          hidePlaceCard();
+        }
+      }
+    }
+
+    map.on('click', (e) => {
+      void openPlaceFromMapClick(e);
+    });
+
+    function getBias() {
+      if (userLocationAccurate && userLocation) return userLocation;
+      const c = map.getCenter();
+      return { lat: c.lat, lng: c.lng };
+    }
+
+    function myLocationPlace(coords) {
+      const c = coords || (userLocationAccurate ? userLocation : null);
+      if (!c) return null;
+      return {
+        placeId: 'my-location',
+        name: 'A sua localização',
+        address: '',
+        lat: c.lat,
+        lng: c.lng
+      };
+    }
+
+    // ── Pesquisa principal (Google-like) ──────────────────────────
+    const mainField = bindPlaceSearchField({
+      root: document.getElementById('mainSearch'),
+      client: placesClient,
+      config,
+      getBias,
+      onSelected: (place) => {
+        setPlacePin(place);
+        showPlaceCard(place);
+        clearRouteDrawing();
+        setRoutePin('origin', null);
+        setRoutePin('dest', null);
+      },
+      onCleared: () => {
+        hidePlaceCard();
+        if (placeMarker) {
+          placeMarker.remove();
+          placeMarker = null;
+        }
+      }
+    });
+
+    // Enhance result rows with pin icon (Google style)
+    const resultsEl = document.querySelector('#mainSearch .search-results');
+    const obs = new MutationObserver(() => {
+      resultsEl.querySelectorAll('button').forEach((btn) => {
+        if (btn.querySelector('.pin-ico')) return;
+        const ico = document.createElement('span');
+        ico.className = 'pin-ico';
+        ico.innerHTML =
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
+        btn.prepend(ico);
+      });
+    });
+    obs.observe(resultsEl, { childList: true });
+
+    // ── Direções ──────────────────────────────────────────────────
+    const originField = bindPlaceSearchField({
+      root: document.getElementById('originSearch'),
+      client: placesClient,
+      config,
+      getBias,
+      onSelected: (place) => {
+        originIsMyLocation = place?.placeId === 'my-location';
+        setRoutePin('origin', place);
+        void maybeDrawRoute();
+      },
+      onCleared: () => {
+        originIsMyLocation = false;
+        setRoutePin('origin', null);
+        clearRouteDrawing();
+      }
+    });
+
+    const destField = bindPlaceSearchField({
+      root: document.getElementById('destSearch'),
+      client: placesClient,
+      config,
+      getBias,
+      onSelected: (place) => {
+        setRoutePin('dest', place);
+        void maybeDrawRoute();
+      },
+      onCleared: () => {
+        setRoutePin('dest', null);
+        clearRouteDrawing();
+      }
+    });
+
+    function showRouteInfo(html, { error = false } = {}) {
+      routeMetaEl.innerHTML = html;
+      routeMetaEl.classList.toggle('err', error);
+      routeInfoEl.classList.add('visible');
+    }
+
+    function renderRouteOptions(routes, selectedIndex = 0) {
+      if (!routes || routes.length < 2) {
+        routeOptionsEl.classList.remove('visible');
+        routeOptionsEl.innerHTML = '';
+        return;
+      }
+      routeOptionsEl.innerHTML = routes
+        .map((r, i) => {
+          const t = formatDuration(r.durationSeconds);
+          const d = formatDistance(r.distanceMeters);
+          const s = r.summary
+            ? `<span class="s">${escapeHtml(r.summary)}</span>`
+            : `<span class="s">Rota ${i + 1}</span>`;
+          return `
+            <button type="button" class="route-option ${i === selectedIndex ? 'selected' : ''}" data-index="${i}">
+              <span class="t">${escapeHtml(t)}</span>
+              <span class="d">${escapeHtml(d)}</span>
+              ${s}
+            </button>`;
+        })
+        .join('');
+      routeOptionsEl.classList.add('visible');
+      routeOptionsEl.querySelectorAll('.route-option').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.index);
+          routeLayer.selectRoute(idx);
+        });
+      });
+    }
+
+    function applySelectedRoute(index) {
+      const routes = lastRoutes || routeLayer.getRoutes();
+      const selected = routes[index];
+      if (!selected) {
+        setStartNavVisible(false);
+        return;
+      }
+      renderRouteOptions(routes, index);
+      showRouteInfo(
+        `<strong>${escapeHtml(formatDuration(selected.durationSeconds))}</strong>` +
+          ` · ${escapeHtml(formatDistance(selected.distanceMeters))}` +
+          (selected.summary
+            ? `<div>${escapeHtml(selected.summary)}</div>`
+            : '')
+      );
+      updateTravelModeEta(selected.durationSeconds);
+      setStartNavVisible(
+        Array.isArray(selected.coordinates) && selected.coordinates.length >= 2
+      );
+      if (navigation?.active) {
+        void navigation.setRoute({
+          coordinates: selected.coordinates,
+          distanceMeters: selected.distanceMeters,
+          durationSeconds: selected.durationSeconds,
+          raw: selected.raw
+        });
+      }
+    }
+
+    routeLayer.onSelect = (index) => {
+      applySelectedRoute(index);
+    };
+
+    function clearRouteDrawing() {
+      if (navigation?.active) navigation.stop();
+      lastRoutes = null;
+      routeLayer.clear();
+      routeInfoEl.classList.remove('visible');
+      routeMetaEl.innerHTML = '';
+      routeOptionsEl.classList.remove('visible');
+      routeOptionsEl.innerHTML = '';
+      setStartNavVisible(false);
+      travelModesEl.querySelectorAll('[data-eta]').forEach((el) => {
+        el.textContent = '';
+      });
+    }
+
+    async function maybeDrawRoute() {
+      const origin = originField.getSelected();
+      const dest = destField.getSelected();
+      if (!origin || !dest) {
+        clearRouteDrawing();
+        return;
+      }
+
+      const gen = ++routeGen;
+      if (routeAbort) routeAbort.abort();
+      routeAbort = new AbortController();
+      showRouteInfo('<strong>A calcular rota…</strong>');
+      setStartNavVisible(false);
+      routeOptionsEl.classList.remove('visible');
+
+      try {
+        const route = await directionsClient.getRoute(
+          { lat: origin.lat, lng: origin.lng },
+          { lat: dest.lat, lng: dest.lng },
+          {
+            signal: routeAbort.signal,
+            alternatives: true,
+            mode: getApiTravelMode(travelMode)
+          }
+        );
+        if (gen !== routeGen) return;
+
+        const routes =
+          route.routes?.length > 0
+            ? route.routes
+            : [
+                {
+                  coordinates: route.coordinates,
+                  primary: true,
+                  index: 0,
+                  distanceMeters: route.distanceMeters,
+                  durationSeconds: route.durationSeconds,
+                  summary: route.summary
+                },
+                ...(route.alternatives || []).map((coordinates, i) => ({
+                  coordinates,
+                  primary: false,
+                  index: i + 1
+                }))
+              ];
+
+        lastRoutes = routes;
+        const selectedIndex = Math.max(
+          0,
+          routes.findIndex((r) => r.primary)
+        );
+        routeLayer.setRoutes(routes, { selectedIndex });
+        applySelectedRoute(selectedIndex < 0 ? 0 : selectedIndex);
+        const selected = routes[selectedIndex < 0 ? 0 : selectedIndex];
+        updateTravelModeEta(selected?.durationSeconds ?? route.durationSeconds);
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        console.error(err);
+        if (gen !== routeGen) return;
+        routeLayer.clear();
+        lastRoutes = null;
+        routeOptionsEl.classList.remove('visible');
+        showRouteInfo(
+          `Erro: ${escapeHtml(err.message || 'não foi possível traçar a rota')}`,
+          { error: true }
+        );
+        setStartNavVisible(false);
+      }
+    }
+
+    async function enterDirectionsMode(destPlace) {
+      searchMode.classList.add('hidden');
+      directionsMode.classList.add('active');
+      originIsMyLocation = true;
+      directionsResumePlace = destPlace || selectedPlace || null;
+      if (destPlace) selectedPlace = destPlace;
+      placeCard.classList.remove('visible', 'loading', 'dir-context');
+      clearMapPickMarker();
+
+      if (placeMarker) {
+        placeMarker.remove();
+        placeMarker = null;
+      }
+
+      if (destPlace) {
+        destField.setPlace(destPlace);
+        setRoutePin('dest', destPlace);
+      }
+
+      originField.input.value = 'A obter localização…';
+      showRouteInfo('<strong>A obter a sua localização…</strong>');
+
+      const coords = await requestUserLocation();
+      if (!directionsMode.classList.contains('active')) return;
+
+      if (!coords) {
+        originIsMyLocation = false;
+        originField.clear();
+        setRoutePin('origin', null);
+        showRouteInfo(
+          'Não foi possível obter a sua localização. Permite o acesso ao GPS ou escolhe uma origem.',
+          { error: true }
+        );
+        originField.input.focus();
+        originField.input.placeholder = 'Escolher origem';
+        return;
+      }
+
+      const origin = myLocationPlace(coords);
+      originField.setPlace(origin);
+      originField.input.placeholder = 'A sua localização';
+      setRoutePin('origin', origin);
+      void maybeDrawRoute();
+
+      if (!destPlace) {
+        destField.input.focus();
+      }
+    }
+
+    function exitDirectionsMode() {
+      if (navigation?.active) navigation.stop();
+      directionsMode.classList.remove('active');
+      searchMode.classList.remove('hidden');
+      originIsMyLocation = false;
+      routeGen += 1;
+      if (routeAbort) routeAbort.abort();
+      if (mapClickAbort) mapClickAbort.abort();
+      clearRouteDrawing();
+      setRoutePin('origin', null);
+      setRoutePin('dest', null);
+      clearMapPickMarker();
+      placeCard.classList.remove('dir-context');
+
+      const resume = directionsResumePlace || selectedPlace;
+      directionsResumePlace = null;
+      if (resume) {
+        selectedPlace = resume;
+        setPlacePin(resume);
+        void showPlaceCard(resume);
+        mainField.setPlace(resume);
+      } else {
+        hidePlaceCard();
+      }
+    }
+
+    async function startNavigation() {
+      const selected = routeLayer.getSelectedRoute();
+      if (!selected?.coordinates || selected.coordinates.length < 2) {
+        showRouteInfo('Sem rota para navegar.', { error: true });
+        return;
+      }
+      btnStartNav.disabled = true;
+      try {
+        hidePlaceCard({ keepSelected: true });
+        clearMapPickMarker();
+        // Remove pin de início; fica destino + Me.png
+        setNavigationPins(true);
+        // Desliga o puck nativo do GeolocateControl (azul)
+        try {
+          if (
+            geolocate._watchState === 'ACTIVE_LOCK' ||
+            geolocate._watchState === 'ACTIVE_ERROR'
+          ) {
+            geolocate.trigger();
+          }
+        } catch {
+          /* ignore */
+        }
+        routeLayer.setNavigationMode(true);
+        await navigation.setRoute({
+          coordinates: selected.coordinates,
+          distanceMeters: selected.distanceMeters,
+          durationSeconds: selected.durationSeconds,
+          raw: selected.raw
+        });
+        navigation.setVoiceEnabled(navVoiceOn);
+        updateNavHud({
+          active: true,
+          starting: true,
+          following: true,
+          instruction: 'A obter localização…',
+          type: 'continue',
+          distanceToManeuverText: '—',
+          remainingDistanceText: formatDistance(selected.distanceMeters),
+          remainingDurationText: formatDuration(selected.durationSeconds),
+          arrivalTimeText: '—',
+          iconHtml: maneuverIconSvg('continue')
+        });
+        await navigation.start();
+      } catch (err) {
+        console.warn('[maphaj] navigation start:', err);
+        navigation.stop();
+        routeLayer.setNavigationMode(false);
+        setNavigationPins(false);
+        showRouteInfo(
+          `Navegação: ${escapeHtml(err.message || 'falhou ao iniciar')}`,
+          { error: true }
+        );
+        setStartNavVisible(true);
+      } finally {
+        btnStartNav.disabled = false;
+      }
+    }
+
+    btnStartNav.addEventListener('click', () => {
+      void startNavigation();
+    });
+    btnStopNav.addEventListener('click', () => {
+      navigation.stop();
+      routeLayer.setNavigationMode(false);
+    });
+    btnNavRecenter.addEventListener('click', () => {
+      navigation.resumeFollow();
+    });
+    btnNavVoice.addEventListener('click', () => {
+      navVoiceOn = !navVoiceOn;
+      navigation.setVoiceEnabled(navVoiceOn);
+      btnNavVoice.classList.toggle('muted', !navVoiceOn);
+      btnNavVoice.setAttribute('aria-pressed', navVoiceOn ? 'true' : 'false');
+      btnNavVoice.title = navVoiceOn
+        ? 'Som das instruções'
+        : 'Som desligado';
+    });
+
+    document.getElementById('btnDirections').addEventListener('click', () => {
+      if (!selectedPlace) return;
+      enterDirectionsMode(selectedPlace);
+    });
+
+    document.getElementById('btnUseAsDest').addEventListener('click', () => {
+      if (!selectedPlace || !directionsMode.classList.contains('active')) return;
+      destField.setPlace(selectedPlace);
+      setRoutePin('dest', selectedPlace);
+      clearMapPickMarker();
+      placeCard.classList.remove('visible', 'loading');
+      void maybeDrawRoute();
+    });
+
+    document.getElementById('btnUseAsOrigin').addEventListener('click', () => {
+      if (!selectedPlace || !directionsMode.classList.contains('active')) return;
+      originIsMyLocation = false;
+      originField.setPlace(selectedPlace);
+      setRoutePin('origin', selectedPlace);
+      clearMapPickMarker();
+      placeCard.classList.remove('visible', 'loading');
+      void maybeDrawRoute();
+    });
+
+    document.getElementById('btnCopyPlace').addEventListener('click', async () => {
+      if (!selectedPlace) return;
+      const text = [
+        selectedPlace.name,
+        selectedPlace.address,
+        selectedPlace.lat != null && selectedPlace.lng != null
+          ? `${selectedPlace.lat}, ${selectedPlace.lng}`
+          : ''
+      ]
+        .filter(Boolean)
+        .join('\n');
+      try {
+        await navigator.clipboard.writeText(text);
+        const btn = document.getElementById('btnCopyPlace');
+        const prev = btn.textContent;
+        btn.textContent = 'Copiado';
+        setTimeout(() => {
+          btn.textContent = prev;
+        }, 1200);
+      } catch (err) {
+        console.warn('[maphaj] clipboard:', err);
+      }
+    });
+
+    document.getElementById('btnClearPlace').addEventListener('click', () => {
+      if (directionsMode.classList.contains('active')) {
+        hidePlaceCard({ keepSelected: false });
+        return;
+      }
+      mainField.clear();
+      hidePlaceCard();
+      if (placeMarker) {
+        placeMarker.remove();
+        placeMarker = null;
+      }
+      mainField.input.focus();
+    });
+
+    document.getElementById('btnBackSearch').addEventListener('click', () => {
+      exitDirectionsMode();
+    });
+
+    if (!hasAuth(config)) {
+      console.warn('[maphaj] Sem x-api-key — base:', config.baseUrl);
+    } else {
+      void mainField.bootstrap();
+    }
+  </script>
+</body>
+</html>
