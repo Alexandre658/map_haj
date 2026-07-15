@@ -22,6 +22,10 @@
     }
     .ui > * { pointer-events: auto; }
 
+    .search-chrome {
+      display: contents;
+    }
+
     /* ── Modo pesquisa (default, estilo Google) ── */
     .panel {
       background: #fff;
@@ -156,6 +160,13 @@
         gap: 0;
         pointer-events: auto;
       }
+      body.search-editing .search-chrome {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        height: 100%;
+        width: 100%;
+      }
       body.search-editing .search-mode {
         border-radius: 0;
         box-shadow: none;
@@ -164,6 +175,8 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        flex: 1;
+        min-width: 0;
       }
       body.search-editing .search-edit-header {
         display: flex;
@@ -1205,7 +1218,7 @@
 
     /* Botão configurações (só ícone) */
     .map-settings-btn {
-      position: absolute;
+      position: fixed;
       z-index: 3;
       left: 12px;
       bottom: 12px;
@@ -1231,7 +1244,7 @@
     .map-settings-btn .ico-menu { display: none; }
 
     .map-settings-panel {
-      position: absolute;
+      position: fixed;
       z-index: 3;
       left: 12px;
       bottom: 64px;
@@ -1245,31 +1258,62 @@
     }
     .map-settings-panel.open { display: block; }
 
-    /* Telemóvel: menu à esquerda da barra de pesquisa */
+    /* Telemóvel: menu + pesquisa alinhados na mesma linha */
     @media (max-width: 720px) {
       .ui {
-        left: 68px;
-        right: 12px;
+        top: 10px;
+        left: 10px;
+        right: 10px;
         max-width: none;
       }
+      .search-chrome {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        width: 100%;
+        pointer-events: none;
+      }
+      .search-chrome > * { pointer-events: auto; }
+      .search-chrome .search-mode {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .search-chrome .search-mode .search-box {
+        min-height: 48px;
+      }
       .map-settings-btn {
-        left: 12px;
+        position: relative;
+        left: auto;
         right: auto;
-        top: 12px;
+        top: auto;
         bottom: auto;
+        flex: 0 0 48px;
         width: 48px;
         height: 48px;
+        align-self: flex-start;
         border-radius: 8px;
         box-shadow: 0 2px 6px rgba(60,64,67,.15), 0 1px 2px rgba(60,64,67,.3);
       }
       .map-settings-btn .ico-gear { display: none; }
       .map-settings-btn .ico-menu { display: block; }
       .map-settings-panel {
-        left: 12px;
+        left: 10px;
         right: auto;
-        top: 68px;
+        top: 66px;
         bottom: auto;
-        width: min(300px, calc(100vw - 24px));
+        width: min(300px, calc(100vw - 20px));
+      }
+      .maplibregl-ctrl-top-right {
+        top: 66px;
+        right: 10px;
+      }
+      .maplibregl-ctrl-bottom-left {
+        bottom: 10px;
+        left: 10px;
+      }
+      .maphaj-brand {
+        right: 10px;
+        bottom: 10px;
       }
     }
     .map-settings-header {
@@ -1598,34 +1642,40 @@
 <body>
   <div class="ui">
     <!-- DEFAULT: pesquisa única estilo Google -->
-    <div class="panel search-mode" id="searchMode">
-      <div class="search-edit-header" id="searchEditHeader">
-        <button type="button" id="btnCloseSearchEdit" title="Voltar" aria-label="Fechar pesquisa">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-        </button>
-        <span>Para onde?</span>
-      </div>
-      <div class="search" id="mainSearch">
-        <div class="search-box">
-          <span class="icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-            </svg>
-          </span>
-          <input
-            class="place-input"
-            type="search"
-            placeholder="Pesquisar no maphaj"
-            autocomplete="off"
-            enterkeyhint="search"
-            aria-label="Pesquisar locais"
-          />
-          <div class="search-spinner" aria-hidden="true"></div>
-          <button type="button" class="search-clear" title="Limpar" aria-label="Limpar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+    <div class="search-chrome">
+      <button type="button" class="map-settings-btn" id="btnMapSettings" aria-label="Configurações do mapa" aria-expanded="false" aria-controls="mapSettingsPanel" title="Configurações">
+        <svg class="ico-gear" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <svg class="ico-menu" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+      </button>
+      <div class="panel search-mode" id="searchMode">
+        <div class="search-edit-header" id="searchEditHeader">
+          <button type="button" id="btnCloseSearchEdit" title="Voltar" aria-label="Fechar pesquisa">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
           </button>
+          <span>Para onde?</span>
         </div>
-        <div class="search-results" role="listbox" aria-label="Sugestões"></div>
+        <div class="search" id="mainSearch">
+          <div class="search-box">
+            <span class="icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+              </svg>
+            </span>
+            <input
+              class="place-input"
+              type="search"
+              placeholder="Pesquisar no maphaj"
+              autocomplete="off"
+              enterkeyhint="search"
+              aria-label="Pesquisar locais"
+            />
+            <div class="search-spinner" aria-hidden="true"></div>
+            <button type="button" class="search-clear" title="Limpar" aria-label="Limpar">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+          <div class="search-results" role="listbox" aria-label="Sugestões"></div>
+        </div>
       </div>
     </div>
 
@@ -1786,11 +1836,6 @@
       </button>
     </div>
   </div>
-
-  <button type="button" class="map-settings-btn" id="btnMapSettings" aria-label="Configurações do mapa" aria-expanded="false" aria-controls="mapSettingsPanel" title="Configurações">
-    <svg class="ico-gear" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-    <svg class="ico-menu" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
-  </button>
 
   <div class="map-settings-panel" id="mapSettingsPanel" role="dialog" aria-label="Configurações do mapa" hidden>
     <div class="map-settings-header">
