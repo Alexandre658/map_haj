@@ -618,8 +618,8 @@ export class RouteLayer {
   }
 
   /**
-   * Modo navegação Google: esconde alternativas / manobras overlay.
-   * Polyline permanece contínua (não cortada / não tracejada).
+   * Modo navegação: polyline contínua + fluxo; mantém alternativas visíveis
+   * (toque = trocar de via). Esconde só overlays de manobra.
    * @param {boolean} on
    */
   setNavigationMode(on) {
@@ -629,15 +629,18 @@ export class RouteLayer {
       this._hideHover();
       this._clearManeuvers({ cancel: true });
       this._removeTraveledLayer();
-      for (const id of [
-        LAYER_ALT,
-        LAYER_ALT_HIT,
-        LAYER_MANEUVERS,
-        LAYER_MANEUVERS_HIT
-      ]) {
+      for (const id of [LAYER_MANEUVERS, LAYER_MANEUVERS_HIT]) {
         if (this.map.getLayer(id)) {
           this.map.setLayoutProperty(id, 'visibility', 'none');
         }
+      }
+      for (const id of [LAYER_ALT, LAYER_ALT_HIT]) {
+        if (this.map.getLayer(id)) {
+          this.map.setLayoutProperty(id, 'visibility', 'visible');
+        }
+      }
+      if (this.map.getLayer(LAYER_ALT)) {
+        this.map.setPaintProperty(LAYER_ALT, 'line-opacity', 0.42);
       }
       // Rota contínua sólida + fluxo animado Uber
       if (this.map.getLayer(LAYER_FLOW)) {
@@ -670,6 +673,9 @@ export class RouteLayer {
         if (this.map.getLayer(id)) {
           this.map.setLayoutProperty(id, 'visibility', 'visible');
         }
+      }
+      if (this.map.getLayer(LAYER_ALT)) {
+        this.map.setPaintProperty(LAYER_ALT, 'line-opacity', ALT_OPACITY);
       }
       if (this.map.getLayer(LAYER_ARROWS)) {
         this.map.setLayoutProperty(LAYER_ARROWS, 'visibility', 'none');
@@ -1092,9 +1098,16 @@ export class RouteLayer {
       this.map.getSource(SOURCE_ALT).setData(altGeo);
       if (this.map.getLayer(LAYER_ALT)) {
         this.map.setPaintProperty(LAYER_ALT, 'line-width', LINE_WIDTH);
+        this.map.setPaintProperty(
+          LAYER_ALT,
+          'line-opacity',
+          this._navMode ? 0.42 : ALT_OPACITY
+        );
+        this.map.setLayoutProperty(LAYER_ALT, 'visibility', 'visible');
       }
       if (this.map.getLayer(LAYER_ALT_HIT)) {
         this.map.setPaintProperty(LAYER_ALT_HIT, 'line-width', HIT_WIDTH);
+        this.map.setLayoutProperty(LAYER_ALT_HIT, 'visibility', 'visible');
       }
     }
 

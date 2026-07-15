@@ -211,13 +211,13 @@ export class NavigationController {
     this.onArrived = opts.onArrived || null;
     this.onProgress = opts.onProgress || null;
     this.onFollowChange = opts.onFollowChange || null;
-    this.offRouteMeters = opts.offRouteMeters ?? 45;
+    this.offRouteMeters = opts.offRouteMeters ?? 32;
     this.arriveMeters = opts.arriveMeters ?? 35;
     this.voiceEnabled = opts.voiceEnabled !== false;
     /** Hits consecutivos GPS fora da polyline para disparar recalc */
     this.offRouteHitsNeeded = opts.offRouteHitsNeeded ?? 2;
     /** Segundos mínimos entre recalculos */
-    this.rerouteCooldownSec = opts.rerouteCooldownSec ?? 8;
+    this.rerouteCooldownSec = opts.rerouteCooldownSec ?? 5;
     /**
      * Só cola o puck à estrada se estiveres mesmo na via e em movimento.
      * Em casa (GPS no edifício) mostra a posição real — não a rua.
@@ -934,6 +934,11 @@ export class NavigationController {
     if (!nearest) return;
 
     const offRoute = nearest.distanceToLineMeters > this.offRouteMeters;
+    // Longe da via → recalcula mais depressa (1 fix); perto do limiar → 2 fixes
+    const hitsNeeded =
+      nearest.distanceToLineMeters > this.offRouteMeters * 2.2
+        ? 1
+        : this.offRouteHitsNeeded;
     if (this._rerouting) {
       this._offRouteHits = 0;
     } else if (offRoute) {
@@ -984,7 +989,7 @@ export class NavigationController {
       speed,
       snapped: shouldSnap,
       offRoute,
-      offRoutePending: offRoute && this._offRouteHits < this.offRouteHitsNeeded,
+      offRoutePending: offRoute && this._offRouteHits < hitsNeeded,
       arrived: false
     };
 
@@ -1013,9 +1018,9 @@ export class NavigationController {
       return;
     }
 
-    const cooldownMs = (this.rerouteCooldownSec || 8) * 1000;
+    const cooldownMs = (this.rerouteCooldownSec || 5) * 1000;
     const cooledDown = Date.now() - this._lastRerouteAt >= cooldownMs;
-    if (this._offRouteHits >= this.offRouteHitsNeeded && cooledDown) {
+    if (this._offRouteHits >= hitsNeeded && cooledDown) {
       this.beginReroute();
       this.onUpdate?.({
         active: true,

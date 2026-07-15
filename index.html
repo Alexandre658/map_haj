@@ -1963,7 +1963,7 @@
           { lat: origin.lat, lng: origin.lng },
           { lat: dest.lat, lng: dest.lng },
           {
-            alternatives: false,
+            alternatives: true,
             mode: getApiTravelMode(travelMode)
           }
         );
@@ -1981,7 +1981,12 @@
                   durationSeconds: route.durationSeconds,
                   summary: route.summary,
                   raw: route.raw
-                }
+                },
+                ...(route.alternatives || []).map((coordinates, i) => ({
+                  coordinates,
+                  primary: false,
+                  index: i + 1
+                }))
               ];
 
         const selected =
@@ -1993,6 +1998,7 @@
         lastRoutes = routes;
         routeLayer.setRoutes(routes, { selectedIndex: 0, fit: false });
         routeLayer.setNavigationMode(true);
+        persistMapsSession();
         alignPinsToRouteGeometry(selected);
         await navigation.setRoute({
           coordinates: selected.coordinates,
@@ -2007,7 +2013,10 @@
           offRoute: false,
           following: navigation.following,
           instruction: 'Rota atualizada',
-          secondary: formatDistance(selected.distanceMeters),
+          secondary:
+            routes.length > 1
+              ? `${routes.length} vias · ${formatDistance(selected.distanceMeters)}`
+              : formatDistance(selected.distanceMeters),
           type: 'continue',
           distanceToManeuverText: '—',
           remainingDistanceText: formatDistance(selected.distanceMeters),
