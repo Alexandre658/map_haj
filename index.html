@@ -1807,6 +1807,7 @@
         lastRoutes = routes;
         routeLayer.setRoutes(routes, { selectedIndex: 0, fit: false });
         routeLayer.setNavigationMode(true);
+        alignPinsToRouteGeometry(selected);
         await navigation.setRoute({
           coordinates: selected.coordinates,
           distanceMeters: selected.distanceMeters,
@@ -2415,6 +2416,39 @@
       else destMarker = marker;
     }
 
+    /**
+     * Places devolve centroides (ex.: bairro "Camama"); o routing termina
+     * na estrada mais próxima. Alinha os pins ao 1.º/último ponto da polyline
+     * (comportamento tipo Google) sem alterar a pesquisa / coords da API.
+     * @param {object|null} route
+     */
+    function alignPinsToRouteGeometry(route) {
+      const coords = route?.coordinates;
+      if (!Array.isArray(coords) || coords.length < 2) return;
+
+      const start = coords[0];
+      const end = coords[coords.length - 1];
+      if (!start || !end) return;
+
+      const origin = originField?.getSelected?.();
+      const dest = destField?.getSelected?.();
+
+      if (origin && hasValidCoords(origin) && !navigation?.active) {
+        setRoutePin('origin', {
+          ...origin,
+          lng: start[0],
+          lat: start[1]
+        });
+      }
+      if (dest && hasValidCoords(dest)) {
+        setRoutePin('dest', {
+          ...dest,
+          lng: end[0],
+          lat: end[1]
+        });
+      }
+    }
+
     function escapeAttr(s) {
       return escapeHtml(s).replace(/'/g, '&#39;');
     }
@@ -2862,6 +2896,7 @@
       setStartNavVisible(
         Array.isArray(selected.coordinates) && selected.coordinates.length >= 2
       );
+      alignPinsToRouteGeometry(selected);
       if (navigation?.active) {
         void navigation.setRoute({
           coordinates: selected.coordinates,
@@ -3034,6 +3069,7 @@
       } else {
         hidePlaceCard();
       }
+      persistMapsSession();
     }
 
     async function startNavigation() {
