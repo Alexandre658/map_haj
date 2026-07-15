@@ -229,6 +229,11 @@ export class NavigationController {
     this._raf = null;
     this._lastFrameTs = 0;
     this._hudAlong = 0;
+    /** Heading da bússola do telemóvel (0 = norte, horário) */
+    this._deviceHeading = null;
+    this._deviceHeadingAt = 0;
+    this._orientationHandler = null;
+    this._compassActive = false;
   }
 
   get active() {
@@ -302,9 +307,13 @@ export class NavigationController {
     this._target = null;
     this._display = null;
     this._hudAlong = 0;
+    this._deviceHeading = null;
     this._ensureNavMarker();
     this._bindMapInteraction();
     this.onFollowChange?.(true);
+
+    // Bússola do telemóvel (preciso para virar parado / no sítio)
+    await this._startCompass();
 
     // Entra em 3D de imediato (não espera pelo 1º GPS)
     this._enter3D();
@@ -351,6 +360,7 @@ export class NavigationController {
     this._target = null;
     this._display = null;
     this._stopSmoothLoop();
+    this._stopCompass();
     if (this._cameraLockTimer) {
       clearTimeout(this._cameraLockTimer);
       this._cameraLockTimer = null;
@@ -671,6 +681,154 @@ export class NavigationController {
     }
   }
 
+  /**
+   * iOS exige permissão num gesto do utilizador (botão Navegar).
+   */
+  async _startCompass() {
+    this._stopCompass();
+    if (typeof window === 'undefined' || !window.DeviceOrientationEvent) {
+      return;
+    }
+
+    try {
+      const DOE = window.DeviceOrientationEvent;
+      if (typeof DOE.requestPermission === 'function') {
+        const state = await DOE.requestPermission();
+        if (state !== 'granted') {
+          console.warn('[Navigation] bússola: permissão negada');
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[Navigation] bússola:', err);
+      return;
+    }
+
+    this._orientationHandler = (e) => this._onDeviceOrientation(e);
+    // absolute quando disponível (Android); iOS usa webkitCompassHeading
+    window.addEventListener('deviceorientationabsolute', this._orientationHandler, true);
+    window.addEventListener('deviceorientation', this._orientationHandler, true);
+    this._compassActive = true;
+  }
+
+  _stopCompass() {
+    if (this._orientationHandler) {
+      window.removeEventListener(
+        'deviceorientationabsolute',
+        this._orientationHandler,
+        true
+      );
+      window.removeEventListener(
+        'deviceorientation',
+        this._orientationHandler,
+        true
+      );
+      this._orientationHandler = null;
+    }
+    this._compassActive = false;
+    this._deviceHeading = null;
+  }
+
+  /**
+   * Converte DeviceOrientation → bearing MapLibre (0=N, horário).
+   * @param {DeviceOrientationEvent} e
+   * @returns {number|null}
+   */
+  _parseCompassHeading(e) {
+    if (!e) return null;
+
+    let heading = null;
+    // Safari / iOS
+    if (
+      typeof e.webkitCompassHeading === 'number' &&
+      Number.isFinite(e.webkitCompassHeading)
+    ) {
+      heading = e.webkitCompassHeading;
+    } else if (e.absolute === true && e.alpha != null && Number.isFinite(e.alpha)) {
+      // W3C: alpha 0 = norte, sentido anti-horário → inverter
+      heading = (360 - e.alpha) % 360;
+    } else if (e.alpha != null && Number.isFinite(e.alpha)) {
+      heading = (360 - e.alpha) % 360;
+    }
+
+    if (heading == null || !Number.isFinite(heading)) return null;
+
+    // Compensar rotação do ecrã (portrait/landscape)
+    let screenAngle = 0;
+    try {
+      if (screen.orientation && typeof screen.orientation.angle === 'number') {
+        screenAngle = screen.orientation.angle;
+      } else if (typeof window.orientation === 'number') {
+        screenAngle = window.orientation;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    heading = (heading + screenAngle + 360) % 360;
+    return heading;
+  }
+
+  /**
+   * @param {DeviceOrientationEvent} e
+   */
+  _onDeviceOrientation(e) {
+    if (!this._active) return;
+    const heading = this._parseCompassHeading(e);
+    if (heading == null) return;
+
+    this._deviceHeading = heading;
+    this._deviceHeadingAt = Date.now();
+
+    // Actualiza já o alvo para a câmara seguir ao virar o telemóvel
+    if (!this._target) {
+      if (this._display) {
+        this._target = {
+          ...this._display,
+          heading,
+          offRoute: false,
+          totalMeters: this._display.alongMeters || 0
+        };
+      }
+      return;
+    }
+
+    const speed = this._target.speed || 0;
+    if (speed < 2.8) {
+      // Parado / a pé lento: mapa segue a bússola (como Google)
+      this._target.heading = heading;
+    } else {
+      // Em velocidade: mistura ligeira para o utilizador sentir o giro
+      this._target.heading = lerpAngle(this._target.heading, heading, 0.45);
+    }
+  }
+
+  /**
+   * Escolhe heading: bússola (parado) / GPS+rota (em movimento).
+   */
+  _resolveHeading(routeBearing, gpsHeading, speed) {
+    const compassFresh =
+      this._deviceHeading != null &&
+      Date.now() - this._deviceHeadingAt < 2500;
+
+    if (speed < 2.8 && compassFresh) {
+      return this._deviceHeading;
+    }
+    if (gpsHeading != null && speed > 1.5) {
+      if (compassFresh) {
+        return lerpAngle(
+          lerpAngle(routeBearing, gpsHeading, 0.5),
+          this._deviceHeading,
+          0.25
+        );
+      }
+      return lerpAngle(routeBearing, gpsHeading, 0.45);
+    }
+    if (compassFresh) return this._deviceHeading;
+    if (gpsHeading != null) return gpsHeading;
+    return routeBearing;
+  }
+
   _ensureNavMarker() {
     if (this._navMarker) return;
     const el = document.createElement('div');
@@ -723,11 +881,7 @@ export class NavigationController {
       this._coordinates,
       nearest.alongMeters
     );
-    // Em movimento: mistura GPS + rota; parado: bearing da rota
-    let heading = routeBearing;
-    if (gpsHeading != null && speed > 1.5) {
-      heading = lerpAngle(routeBearing, gpsHeading, 0.35);
-    }
+    const heading = this._resolveHeading(routeBearing, gpsHeading, speed);
 
     const onRouteLngLat = nearest.lngLat;
     const displayLng = offRoute ? lng : onRouteLngLat[0];
