@@ -97,12 +97,41 @@ function formatArrivalClock(remainingSeconds) {
   return `${hh}:${mm}`;
 }
 
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+/** Interpola ângulos (0–360) pelo caminho mais curto. */
+function lerpAngle(a, b, t) {
+  const d = ((b - a + 540) % 360) - 180;
+  return (a + d * t + 360) % 360;
+}
+
+/** Ponto [lng, lat] a `alongMeters` na polyline. */
+function pointAlongRoute(coordinates, alongMeters) {
+  if (!coordinates || coordinates.length < 2) return null;
+  const target = Math.max(0, alongMeters);
+  let traveled = 0;
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const a = coordinates[i];
+    const b = coordinates[i + 1];
+    const seg = haversineMeters(a[0], a[1], b[0], b[1]);
+    if (traveled + seg >= target || i === coordinates.length - 2) {
+      const t = seg > 0 ? Math.min(1, Math.max(0, (target - traveled) / seg)) : 0;
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    }
+    traveled += seg;
+  }
+  const last = coordinates[coordinates.length - 1];
+  return [last[0], last[1]];
+}
+
 function zoomForSpeed(speedMs) {
   // Google aproxima-se em baixo e afasta em velocidade
-  if (speedMs == null || speedMs < 2) return 17.2;
-  if (speedMs < 8) return 16.6;
-  if (speedMs < 16) return 15.8;
-  return 15.2;
+  if (speedMs == null || speedMs < 2) return 17.4;
+  if (speedMs < 8) return 16.8;
+  if (speedMs < 16) return 16.0;
+  return 15.4;
 }
 
 /**
@@ -193,6 +222,13 @@ export class NavigationController {
     this._dragStartHandler = null;
     this._dragEndHandler = null;
     this._arriveTimer = null;
+    /** Alvo GPS (actualizado em watchPosition) */
+    this._target = null;
+    /** Estado visual interpolado (rAF) */
+    this._display = null;
+    this._raf = null;
+    this._lastFrameTs = 0;
+    this._hudAlong = 0;
   }
 
   get active() {
@@ -263,12 +299,16 @@ export class NavigationController {
     this._userInteracting = false;
     this._lastSpokenKey = '';
     this._programmaticCamera = false;
+    this._target = null;
+    this._display = null;
+    this._hudAlong = 0;
     this._ensureNavMarker();
     this._bindMapInteraction();
     this.onFollowChange?.(true);
 
     // Entra em 3D de imediato (não espera pelo 1º GPS)
     this._enter3D();
+    this._startSmoothLoop();
 
     this._watchId = navigator.geolocation.watchPosition(
       (pos) => this._onPosition(pos),
@@ -282,8 +322,8 @@ export class NavigationController {
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 1000,
-        timeout: 15000
+        maximumAge: 500,
+        timeout: 12000
       }
     );
 
@@ -308,6 +348,9 @@ export class NavigationController {
     this._following = true;
     this._userInteracting = false;
     this._programmaticCamera = false;
+    this._target = null;
+    this._display = null;
+    this._stopSmoothLoop();
     if (this._cameraLockTimer) {
       clearTimeout(this._cameraLockTimer);
       this._cameraLockTimer = null;
@@ -349,11 +392,14 @@ export class NavigationController {
     this._following = true;
     this._userInteracting = false;
     this.onFollowChange?.(true);
-    if (this._lastPos) {
+    if (this._display) {
+      this._applyCameraFrame(this._display);
+    } else if (this._lastPos) {
       this._updateCamera(
         [this._lastPos.lng, this._lastPos.lat],
         this._lastHeading,
-        0
+        0,
+        { force: true, duration: 500 }
       );
     } else {
       this._enter3D();
@@ -384,13 +430,207 @@ export class NavigationController {
       lngLat = [this._lastPos.lng, this._lastPos.lat];
       heading = this._lastHeading || heading;
     } else {
-      // Coloca o puck no início da rota enquanto o GPS chega
       this._ensureNavMarker();
       this._navMarker.setLngLat(lngLat).setRotation(heading).addTo(this.map);
     }
 
     this._lastHeading = heading;
-    this._updateCamera(lngLat, heading, 0, { duration: 900, force: true });
+    this._display = {
+      lng: lngLat[0],
+      lat: lngLat[1],
+      heading,
+      alongMeters: 0,
+      speed: 0
+    };
+    this._target = { ...this._display, offRoute: false };
+
+    this._programmaticCamera = true;
+    try {
+      const center = offsetByBearing(lngLat[0], lngLat[1], heading, 45);
+      this.map.easeTo({
+        center,
+        bearing: heading,
+        pitch: 65,
+        zoom: 17.2,
+        duration: 900,
+        essential: true,
+        padding: { top: 160, bottom: 140, left: 0, right: 0 }
+      });
+    } catch {
+      /* ignore */
+    }
+    clearTimeout(this._cameraLockTimer);
+    this._cameraLockTimer = setTimeout(() => {
+      this._programmaticCamera = false;
+    }, 1000);
+  }
+
+  _startSmoothLoop() {
+    this._stopSmoothLoop();
+    this._lastFrameTs = 0;
+    const tick = (ts) => {
+      if (!this._active) return;
+      this._raf = requestAnimationFrame(tick);
+      this._onFrame(ts);
+    };
+    this._raf = requestAnimationFrame(tick);
+  }
+
+  _stopSmoothLoop() {
+    if (this._raf != null) {
+      cancelAnimationFrame(this._raf);
+      this._raf = null;
+    }
+    this._lastFrameTs = 0;
+  }
+
+  /**
+   * Loop ~60fps: interpola puck + câmara (estilo Google).
+   * @param {number} ts
+   */
+  _onFrame(ts) {
+    if (!this._target || !this._display) return;
+    const prev = this._lastFrameTs || ts;
+    this._lastFrameTs = ts;
+    const dt = Math.min(0.064, Math.max(0.001, (ts - prev) / 1000));
+
+    // Amortecimento: curvas ~ suaves (Google ~ 5–8)
+    const posK = 1 - Math.exp(-dt * 6.5);
+    const headK = 1 - Math.exp(-dt * 5.2);
+
+    const t = this._target;
+    const d = this._display;
+
+    // Avanço monotónico na rota (evita saltos para trás por GPS ruidoso)
+    let along = d.alongMeters;
+    if (!t.offRoute && this._coordinates) {
+      if (t.alongMeters >= along - 2) {
+        along = lerp(along, t.alongMeters, posK);
+      } else if (along - t.alongMeters > 40) {
+        along = lerp(along, t.alongMeters, posK);
+      }
+      const pt = pointAlongRoute(this._coordinates, along);
+      if (pt) {
+        d.lng = pt[0];
+        d.lat = pt[1];
+      }
+      d.alongMeters = along;
+    } else {
+      d.lng = lerp(d.lng, t.lng, posK);
+      d.lat = lerp(d.lat, t.lat, posK);
+      d.alongMeters = t.alongMeters;
+    }
+
+    d.heading = lerpAngle(d.heading, t.heading, headK);
+    d.speed = lerp(d.speed ?? 0, t.speed ?? 0, posK);
+
+    this._lastHeading = d.heading;
+    this._lastPos = { lat: d.lat, lng: d.lng };
+
+    this._ensureNavMarker();
+    this._navMarker
+      .setLngLat([d.lng, d.lat])
+      .setRotation(d.heading)
+      .addTo(this.map);
+
+    if (this._following && !this._userInteracting) {
+      this._applyCameraFrame(d);
+    }
+
+    // HUD / progresso ~ 5 Hz
+    if (!this._hudAlong || Math.abs(along - this._hudAlong) > 4 || ts - (this._lastHudTs || 0) > 200) {
+      this._hudAlong = along;
+      this._lastHudTs = ts;
+      this._emitHudFromDisplay();
+    }
+  }
+
+  /**
+   * @param {{ lng: number, lat: number, heading: number, speed: number }} d
+   */
+  _applyCameraFrame(d) {
+    const speed = d.speed || 0;
+    const lookAhead = speed > 12 ? 95 : speed > 5 ? 65 : speed > 2 ? 48 : 36;
+    const center = offsetByBearing(d.lng, d.lat, d.heading, lookAhead);
+    this._programmaticCamera = true;
+    try {
+      this.map.jumpTo({
+        center,
+        bearing: d.heading,
+        pitch: 65,
+        zoom: Math.max(zoomForSpeed(speed), 16.6),
+        padding: { top: 160, bottom: 140, left: 0, right: 0 }
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  _emitHudFromDisplay() {
+    if (!this._active || !this._target || !this._coordinates) return;
+    const t = this._target;
+    const along = this._display?.alongMeters ?? t.alongMeters;
+    const nearestTotal = t.totalMeters || 1;
+    const remainingGeom = Math.max(0, nearestTotal - along);
+    const fractionLeft = nearestTotal > 0 ? remainingGeom / nearestTotal : 0;
+    const remainingDist =
+      this._distanceMeters != null
+        ? Math.max(0, this._distanceMeters * fractionLeft)
+        : remainingGeom;
+    const remainingTime =
+      this._durationSeconds != null
+        ? Math.max(0, this._durationSeconds * fractionLeft)
+        : null;
+
+    const split = splitPolylineAt(along, this._coordinates);
+    this.onProgress?.({
+      alongMeters: along,
+      traveled: split.traveled,
+      remaining: split.remaining
+    });
+
+    if (t.arrived) return;
+    if (this._rerouting || t.offRoutePending) return;
+
+    const next = this._nextManeuver(along);
+    const distToManeuver = next
+      ? Math.max(0, next.alongMeters - along)
+      : remainingDist;
+    const street = next?.street || null;
+    const instruction =
+      street ||
+      next?.instruction ||
+      formatManeuverText(next?.type || 'continue', null) ||
+      'Siga em frente';
+    const secondary =
+      street && next?.type ? formatManeuverText(next.type, null) : null;
+
+    this._maybeSpeak(next, distToManeuver, instruction);
+
+    this.onUpdate?.({
+      active: true,
+      arrived: false,
+      offRoute: Boolean(t.offRoute),
+      following: this._following,
+      type: next?.type || 'continue',
+      instruction: t.offRoute ? 'Fora da rota' : instruction,
+      secondary: t.offRoute ? 'A verificar…' : secondary,
+      street,
+      distanceToManeuverMeters: distToManeuver,
+      distanceToManeuverText: formatNavDistance(distToManeuver),
+      remainingDistanceMeters: remainingDist,
+      remainingDurationSeconds: remainingTime,
+      remainingDistanceText: formatNavDistance(remainingDist),
+      remainingDurationText: formatDuration(remainingTime),
+      arrivalTimeText: formatArrivalClock(remainingTime),
+      alongMeters: along,
+      heading: this._display.heading,
+      position: { lat: this._display.lat, lng: this._display.lng },
+      speedMps: t.speed,
+      speedKmh:
+        t.speed != null && t.speed > 0.5 ? Math.round(t.speed * 3.6) : null,
+      iconHtml: maneuverIconSvg(next?.type || 'continue')
+    });
   }
 
   _bindMapInteraction() {
@@ -445,57 +685,19 @@ export class NavigationController {
     this._navMarker = new maplibregl.Marker({
       element: el,
       anchor: 'center',
-      // Roda com o heading (como Google); mantém legível em pitch 3D
       rotationAlignment: 'map',
-      pitchAlignment: 'viewport'
+      pitchAlignment: 'map'
     });
   }
 
   /**
-   * @param {number[]} lngLat
-   * @param {number} heading
-   * @param {number} speedMs
-   * @param {{ duration?: number, force?: boolean }} [opts]
-   */
-  _updateCamera(lngLat, heading, speedMs, opts = {}) {
-    if (!opts.force && (!this._following || this._userInteracting)) return;
-    const lookAhead = speedMs > 8 ? 90 : speedMs > 3 ? 55 : 40;
-    const center = offsetByBearing(lngLat[0], lngLat[1], heading, lookAhead);
-    this._programmaticCamera = true;
-    try {
-      this.map.easeTo({
-        center,
-        bearing: heading,
-        pitch: 65,
-        zoom: Math.max(zoomForSpeed(speedMs), 16.5),
-        duration: opts.duration ?? 850,
-        essential: true,
-        padding: { top: 160, bottom: 140, left: 0, right: 0 }
-      });
-    } catch {
-      try {
-        this.map.jumpTo({
-          center,
-          bearing: heading,
-          pitch: 65,
-          zoom: Math.max(zoomForSpeed(speedMs), 16.5)
-        });
-      } catch {
-        /* ignore */
-      }
-    }
-    // Liberta o lock após a animação (pitchstart/rotatestart programáticos)
-    clearTimeout(this._cameraLockTimer);
-    this._cameraLockTimer = setTimeout(() => {
-      this._programmaticCamera = false;
-    }, (opts.duration ?? 850) + 80);
-  }
-
-  /**
+   * GPS → apenas actualiza o alvo; a animação corre no rAF.
    * @param {GeolocationPosition} pos
    */
   _onPosition(pos) {
     if (!this._active || !this._coordinates) return;
+
+    this._ensureNavMarker();
 
     const lat = pos.coords.latitude;
     const lng = pos.coords.longitude;
@@ -517,52 +719,48 @@ export class NavigationController {
       this._offRouteHits = 0;
     }
 
-    const remainingGeom = Math.max(
-      0,
-      nearest.totalMeters - nearest.alongMeters
-    );
-    const fractionLeft =
-      nearest.totalMeters > 0 ? remainingGeom / nearest.totalMeters : 0;
-    const remainingDist =
-      this._distanceMeters != null
-        ? Math.max(0, this._distanceMeters * fractionLeft)
-        : remainingGeom;
-    const remainingTime =
-      this._durationSeconds != null
-        ? Math.max(0, this._durationSeconds * fractionLeft)
-        : null;
-
     const routeBearing = bearingAlongRoute(
       this._coordinates,
       nearest.alongMeters
     );
-    const heading =
-      gpsHeading != null && speed > 1.2 ? gpsHeading : routeBearing;
-    this._lastHeading = heading;
-    this._lastPos = { lat, lng };
+    // Em movimento: mistura GPS + rota; parado: bearing da rota
+    let heading = routeBearing;
+    if (gpsHeading != null && speed > 1.5) {
+      heading = lerpAngle(routeBearing, gpsHeading, 0.35);
+    }
 
-    const displayLngLat =
-      nearest.distanceToLineMeters < this.offRouteMeters
-        ? nearest.lngLat
-        : [lng, lat];
+    const onRouteLngLat = nearest.lngLat;
+    const displayLng = offRoute ? lng : onRouteLngLat[0];
+    const displayLat = offRoute ? lat : onRouteLngLat[1];
 
-    this._navMarker.setLngLat(displayLngLat).setRotation(heading).addTo(this.map);
-    this._updateCamera(displayLngLat, heading, speed);
+    if (!this._display) {
+      this._display = {
+        lng: displayLng,
+        lat: displayLat,
+        heading,
+        alongMeters: nearest.alongMeters,
+        speed
+      };
+    }
 
-    const split = splitPolylineAt(nearest.alongMeters, this._coordinates);
-    this.onProgress?.({
+    this._target = {
+      lng: displayLng,
+      lat: displayLat,
+      heading,
       alongMeters: nearest.alongMeters,
-      traveled: split.traveled,
-      remaining: split.remaining
-    });
+      totalMeters: nearest.totalMeters,
+      speed,
+      offRoute,
+      offRoutePending: offRoute && this._offRouteHits < this.offRouteHitsNeeded,
+      arrived: false
+    };
 
-    const next = this._nextManeuver(nearest.alongMeters);
-    const distToManeuver = next
-      ? Math.max(0, next.alongMeters - nearest.alongMeters)
-      : remainingDist;
-
-    const arrived = remainingGeom <= this.arriveMeters;
-    if (arrived) {
+    const remainingGeom = Math.max(
+      0,
+      nearest.totalMeters - nearest.alongMeters
+    );
+    if (remainingGeom <= this.arriveMeters) {
+      this._target.arrived = true;
       this._emitArrived({ lat, lng, heading });
       return;
     }
@@ -575,14 +773,8 @@ export class NavigationController {
         instruction: 'A recalcular rota…',
         type: 'continue',
         distanceToManeuverText: '—',
-        remainingDistanceText: formatNavDistance(remainingDist),
-        remainingDurationText: formatDuration(remainingTime),
-        arrivalTimeText: formatArrivalClock(remainingTime),
-        remainingDistanceMeters: remainingDist,
-        remainingDurationSeconds: remainingTime,
-        heading,
-        position: { lat, lng },
-        speedMps: speed,
+        remainingDistanceText: '—',
+        remainingDurationText: '—',
         iconHtml: maneuverIconSvg('continue')
       });
       return;
@@ -590,10 +782,7 @@ export class NavigationController {
 
     const cooldownMs = (this.rerouteCooldownSec || 8) * 1000;
     const cooledDown = Date.now() - this._lastRerouteAt >= cooldownMs;
-    if (
-      this._offRouteHits >= this.offRouteHitsNeeded &&
-      cooledDown
-    ) {
+    if (this._offRouteHits >= this.offRouteHitsNeeded && cooledDown) {
       this.beginReroute();
       this.onUpdate?.({
         active: true,
@@ -602,86 +791,43 @@ export class NavigationController {
         instruction: 'A recalcular rota…',
         type: 'continue',
         distanceToManeuverText: '—',
-        remainingDistanceText: formatNavDistance(remainingDist),
-        remainingDurationText: formatDuration(remainingTime),
-        arrivalTimeText: formatArrivalClock(remainingTime),
-        remainingDistanceMeters: remainingDist,
-        remainingDurationSeconds: remainingTime,
-        heading,
-        position: { lat, lng },
-        speedMps: speed,
+        remainingDistanceText: '—',
+        remainingDurationText: '—',
         iconHtml: maneuverIconSvg('continue')
       });
       this.onOffRoute?.({ lat, lng });
-      return;
     }
+  }
 
-    // Fora da rota mas ainda a acumular hits / em cooldown
-    if (offRoute) {
-      this.onUpdate?.({
-        active: true,
-        offRoute: true,
-        following: this._following,
-        instruction: 'Fora da rota',
-        secondary: 'A verificar…',
-        type: 'continue',
-        distanceToManeuverText: '—',
-        remainingDistanceText: formatNavDistance(remainingDist),
-        remainingDurationText: formatDuration(remainingTime),
-        arrivalTimeText: formatArrivalClock(remainingTime),
-        remainingDistanceMeters: remainingDist,
-        remainingDurationSeconds: remainingTime,
-        heading,
-        position: { lat, lng },
-        speedMps: speed,
-        iconHtml: maneuverIconSvg('continue')
+  /**
+   * @deprecated mantido por compat; a câmara agora é por rAF
+   */
+  _updateCamera(lngLat, heading, speedMs, opts = {}) {
+    if (!opts.force && (!this._following || this._userInteracting)) return;
+    this._programmaticCamera = true;
+    const lookAhead = speedMs > 8 ? 90 : speedMs > 3 ? 55 : 40;
+    const center = offsetByBearing(lngLat[0], lngLat[1], heading, lookAhead);
+    try {
+      this.map.easeTo({
+        center,
+        bearing: heading,
+        pitch: 65,
+        zoom: Math.max(zoomForSpeed(speedMs), 16.5),
+        duration: opts.duration ?? 700,
+        essential: true,
+        padding: { top: 160, bottom: 140, left: 0, right: 0 }
       });
-      return;
+    } catch {
+      /* ignore */
     }
-
-    // Google: distância grande + nome da rua (ou instrução curta)
-    const street = next?.street || null;
-    const instruction =
-      street ||
-      next?.instruction ||
-      formatManeuverText(next?.type || 'continue', null) ||
-      'Siga em frente';
-    const secondary =
-      street && next?.type
-        ? formatManeuverText(next.type, null)
-        : next?.instruction && street
-          ? next.instruction
-          : null;
-
-    this._maybeSpeak(next, distToManeuver, instruction);
-
-    this.onUpdate?.({
-      active: true,
-      arrived: false,
-      offRoute: false,
-      following: this._following,
-      type: next?.type || 'continue',
-      instruction,
-      secondary,
-      street,
-      distanceToManeuverMeters: distToManeuver,
-      distanceToManeuverText: formatNavDistance(distToManeuver),
-      remainingDistanceMeters: remainingDist,
-      remainingDurationSeconds: remainingTime,
-      remainingDistanceText: formatNavDistance(remainingDist),
-      remainingDurationText: formatDuration(remainingTime),
-      arrivalTimeText: formatArrivalClock(remainingTime),
-      alongMeters: nearest.alongMeters,
-      heading,
-      position: { lat, lng },
-      speedMps: speed,
-      speedKmh:
-        speed != null && speed > 0.5 ? Math.round(speed * 3.6) : null,
-      iconHtml: maneuverIconSvg(next?.type || 'continue')
-    });
+    clearTimeout(this._cameraLockTimer);
+    this._cameraLockTimer = setTimeout(() => {
+      this._programmaticCamera = false;
+    }, (opts.duration ?? 700) + 80);
   }
 
   _emitArrived({ lat, lng, heading }) {
+    this._stopSmoothLoop();
     this.onUpdate?.({
       active: true,
       arrived: true,
