@@ -575,6 +575,11 @@
         display: none !important;
       }
 
+      .directions-mode.editing .dir-header span {
+        font-size: 16px;
+        font-weight: 600;
+      }
+
       .directions-mode.editing .dir-sheet-details {
         display: flex !important;
         flex-direction: column;
@@ -586,6 +591,23 @@
       .directions-mode.editing .trip-row {
         flex-shrink: 0;
         border-bottom: 1px solid #e8eaed;
+      }
+
+      .directions-mode.editing .search-box {
+        margin: 0 8px 0 0;
+        padding: 0 10px;
+        border-radius: 22px;
+        background: #f8f9fa;
+        border: 1px solid #dadce0;
+        min-height: 42px;
+      }
+
+      .directions-mode.editing .trip-row:not(.dir-editing-active) {
+        opacity: 0.55;
+      }
+
+      .directions-mode.editing .trip-row.dir-editing-active {
+        opacity: 1;
       }
 
       .directions-mode.editing .search-results {
@@ -2103,16 +2125,33 @@
       directionsMode.style.setProperty('--dir-results-top', `${top}px`);
     }
 
-    function setDirectionsEditing(on) {
+    function setDirectionsEditing(on, which = null) {
+      const titleEl = directionsMode.querySelector('.dir-header span');
+      directionsMode
+        .querySelectorAll('.trip-row.dir-editing-active')
+        .forEach((el) => el.classList.remove('dir-editing-active'));
+
       if (!on || !isMobileDirectionsUi()) {
         directionsMode.classList.remove('editing');
         document.body.classList.remove('dir-editing');
         directionsMode.style.removeProperty('--dir-results-top');
+        delete directionsMode.dataset.editingField;
+        if (titleEl) titleEl.textContent = 'Direções';
         return;
       }
       setDirectionsCollapsed(false);
       directionsMode.classList.add('editing');
       document.body.classList.add('dir-editing');
+      if (which === 'origin' || which === 'dest') {
+        directionsMode.dataset.editingField = which;
+        if (titleEl) {
+          titleEl.textContent = which === 'origin' ? 'De onde?' : 'Para onde?';
+        }
+        const row = document.querySelector(
+          which === 'origin' ? '.trip-row.origin' : '.trip-row.dest'
+        );
+        row?.classList.add('dir-editing-active');
+      }
       requestAnimationFrame(syncDirResultsTop);
     }
 
@@ -3421,9 +3460,14 @@
       client: placesClient,
       config,
       getBias,
+      onFocus: () => {
+        setDirectionsEditing(true, 'origin');
+        requestAnimationFrame(syncDirResultsTop);
+      },
       onSelected: (place) => {
         originIsMyLocation = place?.placeId === 'my-location';
         setRoutePin('origin', place);
+        originField.closeResults?.();
         setDirectionsEditing(false);
         void maybeDrawRoute();
       },
@@ -3439,8 +3483,13 @@
       client: placesClient,
       config,
       getBias,
+      onFocus: () => {
+        setDirectionsEditing(true, 'dest');
+        requestAnimationFrame(syncDirResultsTop);
+      },
       onSelected: (place) => {
         setRoutePin('dest', place);
+        destField.closeResults?.();
         setDirectionsEditing(false);
         void maybeDrawRoute();
       },
@@ -3450,10 +3499,6 @@
       }
     });
 
-    function onDirFieldFocus() {
-      setDirectionsEditing(true);
-      syncDirResultsTop();
-    }
     function onDirFieldBlur() {
       setTimeout(() => {
         const ae = document.activeElement;
@@ -3462,15 +3507,15 @@
           return;
         }
         if (
-          ae?.closest?.('#originSearch, #destSearch, #directionsMode .search-results')
+          ae?.closest?.(
+            '#originSearch, #destSearch, #directionsMode .search-results'
+          )
         ) {
           return;
         }
         setDirectionsEditing(false);
       }, 200);
     }
-    originField.input.addEventListener('focus', onDirFieldFocus);
-    destField.input.addEventListener('focus', onDirFieldFocus);
     originField.input.addEventListener('blur', onDirFieldBlur);
     destField.input.addEventListener('blur', onDirFieldBlur);
     window.visualViewport?.addEventListener('resize', syncDirResultsTop);

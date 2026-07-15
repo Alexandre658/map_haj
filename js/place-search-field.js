@@ -194,7 +194,14 @@ export function bindPlaceSearchField({
   input.addEventListener('focus', () => {
     suppressResults = false;
     onFocus?.();
-    if (!input.value.trim()) controller.showHistoryOnly();
+    // Reabrir sugestões / recentes ao editar de novo (padrão Google)
+    controller.showHistoryOnly();
+    try {
+      // Facilita substituir o endereço actual
+      if (input.value) input.select();
+    } catch {
+      /* ignore */
+    }
   });
 
   input.addEventListener('blur', () => {
