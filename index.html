@@ -1552,7 +1552,8 @@
       border: 0;
       box-shadow: none;
       display: block;
-      pointer-events: none;
+      pointer-events: auto;
+      cursor: pointer;
       line-height: 0;
       overflow: visible;
       flex-shrink: 0;
@@ -1579,7 +1580,8 @@
       border: 0;
       box-shadow: none;
       display: block;
-      pointer-events: none;
+      pointer-events: auto;
+      cursor: pointer;
       line-height: 0;
       overflow: visible;
       flex-shrink: 0;
@@ -1615,7 +1617,8 @@
       color: #111;
       line-height: 1.25;
       white-space: nowrap;
-      pointer-events: none;
+      pointer-events: auto;
+      cursor: pointer;
       z-index: 2;
     }
     .maphaj-marker-start .route-pin-card {
@@ -3154,23 +3157,46 @@
     function setRoutePin(kind, place) {
       // Em navegação nunca mostrar pin de start (origem)
       if (kind === 'origin' && navigation?.active) {
-        routePins.setPin('origin', null);
         if (originMarker) {
           originMarker.remove();
           originMarker = null;
         }
+        routePins.setPin('origin', null);
         return;
       }
-      // Remover residual HTML antigo (migração)
-      if (kind === 'origin' && originMarker) {
-        originMarker.remove();
-        originMarker = null;
+
+      const markerKind = kind === 'origin' ? 'origin' : 'dest';
+      let markerRef = kind === 'origin' ? originMarker : destMarker;
+
+      if (markerRef) {
+        markerRef.remove();
+        markerRef = null;
       }
-      if (kind === 'dest' && destMarker) {
-        destMarker.remove();
-        destMarker = null;
+
+      if (!place || place.lat == null || place.lng == null) {
+        if (kind === 'origin') originMarker = null;
+        else destMarker = null;
+        routePins.setPin(kind, null);
+        return;
       }
-      routePins.setPin(kind, place || null);
+
+      const marker = makeMarker(markerKind, place)
+        .setLngLat([Number(place.lng), Number(place.lat)])
+        .addTo(map);
+
+      marker.on('click', (e) => {
+        e?.originalEvent?.stopPropagation?.();
+        if (navigation?.active) return;
+        void showPlaceCard(place, {
+          fromMap: directionsMode.classList.contains('active')
+        });
+      });
+
+      if (kind === 'origin') originMarker = marker;
+      else destMarker = marker;
+
+      // Limpa residual da Symbol layer (migração antiga)
+      routePins.setPin(kind, null);
     }
 
     function isPreciseMapPlace(place) {
