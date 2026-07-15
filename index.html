@@ -1542,8 +1542,7 @@
     .maphaj-marker.place { background: #ea4335; }
     .maphaj-marker.dest { background: #ea4335; }
 
-    /* Marcador de início / pesquisa — pin azul com haste
-       Caixa FIXA = âncora MapLibre; cartão absolutamente fora (não desloca o geo) */
+    /* Marcador de início / pesquisa — pin azul com haste */
     .maphaj-marker-start {
       position: relative;
       width: 40px;
@@ -1597,43 +1596,6 @@
       height: 28px;
       display: block;
       overflow: visible;
-    }
-
-    /* Cartões "De" / "Para" — absolutos, sem transformar o root do Marker */
-    .route-pin-card {
-      position: absolute;
-      left: calc(100% + 6px);
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      max-width: 200px;
-      padding: 7px 8px 7px 11px;
-      background: #fff;
-      border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 13px;
-      font-weight: 600;
-      color: #111;
-      line-height: 1.25;
-      white-space: nowrap;
-      pointer-events: auto;
-      cursor: pointer;
-      z-index: 2;
-    }
-    .maphaj-marker-start .route-pin-card {
-      top: 8px;
-    }
-    .route-pin-text {
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .route-pin-chevron {
-      flex-shrink: 0;
-      color: #757575;
-      font-weight: 400;
-      font-size: 15px;
-      line-height: 1;
     }
   </style>
 </head>
@@ -3037,15 +2999,7 @@
 
     let pinSeq = 0;
 
-    function routePinCardHtml(prefix, label) {
-      return `
-        <span class="route-pin-card">
-          <span class="route-pin-text">${escapeHtml(prefix)} ${escapeHtml(label)}</span>
-          <span class="route-pin-chevron" aria-hidden="true">›</span>
-        </span>`;
-    }
-
-    function makeStartPinElement(label) {
+    function makeStartPinElement() {
       const id = `mh${++pinSeq}`;
       const wrap = document.createElement('div');
       wrap.className = 'maphaj-marker-start';
@@ -3071,7 +3025,6 @@
             <circle cx="40" cy="97" r="2.5" fill="#1A1A1A"/>
           </svg>
         </div>`;
-      if (label) wrap.insertAdjacentHTML('beforeend', routePinCardHtml('De', label));
       return wrap;
     }
 
@@ -3086,17 +3039,6 @@
           </svg>
         </div>`;
       return wrap;
-    }
-
-    function shortPinLabel(place) {
-      if (!place) return 'Local';
-      let n = String(place.name || '').trim();
-      if (!n || /^sua localiza/i.test(n) || /^a sua localiza/i.test(n) || /^my location/i.test(n)) {
-        n = String(place.address || '').split(',')[0].trim();
-      }
-      if (!n) n = String(place.address || '').split(',')[0].trim();
-      if (n.length > 28) n = `${n.slice(0, 26).trim()}…`;
-      return n || 'Local';
     }
 
     function setPlacePin(place, { fly = true } = {}) {
@@ -3168,9 +3110,7 @@
       //   .addTo(map);
       const marker = new maplibregl.Marker({
         element:
-          kind === 'origin'
-            ? makeStartPinElement(shortPinLabel(place))
-            : makeDestPinElement(),
+          kind === 'origin' ? makeStartPinElement() : makeDestPinElement(),
         anchor: kind === 'origin' ? 'bottom' : 'center',
         offset: kind === 'origin' ? [0, 2] : [0, 0]
       })
