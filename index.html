@@ -1849,7 +1849,7 @@
     import { hasValidCoords } from './js/places-model.js';
     import { NavigationController } from './js/navigation-controller.js';
     import { maneuverIconSvg } from './js/route-maneuvers.js';
-    import { parseMapsUrl, bindMapsUrl } from './js/maps-url.js';
+    import { parseMapsUrl, parseAppState, syncMapsUrl, bindMapsUrl } from './js/maps-url.js';
     import {
       loadMapsSession,
       saveMapsSession,
@@ -1867,6 +1867,13 @@
 
     const ANGOLA_BOUNDS = [[11.4, -18.1], [24.1, -4.3]];
     const initialView = parseMapsUrl();
+    const initialAppState = parseAppState();
+
+    /** Refs para sync URL (estado preenchido depois dos campos existirem) */
+    const urlSync = {
+      getState: () => null,
+      onPopState: null
+    };
 
     const map = new maplibregl.Map({
       container: 'map',
@@ -1879,7 +1886,10 @@
       attributionControl: false,
       maxBounds: [[8.0, -20.5], [27.5, -2.0]]
     });
-    bindMapsUrl(map);
+    bindMapsUrl(map, {
+      getState: () => urlSync.getState(),
+      onPopState: (st) => urlSync.onPopState?.(st)
+    });
     const routePins = new RoutePinsLayer(map);
     // onClick: ligado mais abaixo quando showPlaceCard existir
     routePins.onClick = null;
@@ -2222,6 +2232,7 @@
     function updateNavHud(state) {
       if (!state?.active) {
         setNavChrome(false);
+        persistMapsSession();
         return;
       }
       if (state.keepHud && state.following === false) {
@@ -2478,11 +2489,51 @@
     /** Evita gravar sessão durante restore */
     let sessionRestoring = false;
 
+    function getAppUrlState() {
+      const navOn = Boolean(navigation?.active);
+      const inDir = directionsMode.classList.contains('active');
+      let routeIndex = 0;
+      try {
+        routeIndex = routeLayer.getSelectedIndex?.() ?? 0;
+      } catch {
+        routeIndex = 0;
+      }
+      if (navOn || inDir) {
+        return {
+          mode: navOn ? 'nav' : 'directions',
+          originIsMyLocation: Boolean(originIsMyLocation),
+          origin: originField?.getSelected?.() || null,
+          dest: destField?.getSelected?.() || null,
+          travelMode,
+          routeIndex,
+          place: null
+        };
+      }
+      return {
+        mode: 'search',
+        place:
+          selectedPlace && hasValidCoords(selectedPlace) ? selectedPlace : null
+      };
+    }
+
+    function syncAppUrl({ replace = true } = {}) {
+      if (sessionRestoring) return;
+      try {
+        syncMapsUrl(map, {
+          replace,
+          state: getAppUrlState()
+        });
+      } catch (err) {
+        console.warn('[maphaj] sync url:', err);
+      }
+    }
+
     function persistMapsSession() {
       if (sessionRestoring) return;
       try {
         const c = map.getCenter();
         const inDir = directionsMode.classList.contains('active');
+        const navOn = Boolean(navigation?.active);
         const origin = originField?.getSelected?.() || null;
         const dest = destField?.getSelected?.() || null;
         saveMapsSession({
@@ -2493,13 +2544,13 @@
             lng: c.lng,
             zoom: map.getZoom()
           },
-          mode: inDir ? 'directions' : 'search',
+          mode: navOn ? 'nav' : inDir ? 'directions' : 'search',
           travelMode,
           place: serializePlace(selectedPlace),
           origin: serializePlace(origin),
           dest: serializePlace(dest),
           originIsMyLocation: Boolean(originIsMyLocation),
-          routes: inDir ? serializeRoutes(lastRoutes) : null,
+          routes: inDir || navOn ? serializeRoutes(lastRoutes) : null,
           selectedRouteIndex: (() => {
             try {
               const routes = routeLayer.getRoutes();
@@ -2511,10 +2562,13 @@
             }
           })()
         });
+        syncAppUrl();
       } catch (err) {
         console.warn('[maphaj] persist:', err);
       }
     }
+
+    urlSync.getState = getAppUrlState;
 
     /**
      * Abre pin + cartão num ponto (ex.: deep link /maps/@lat,lng,z).
@@ -2570,17 +2624,39 @@
       try {
         const session = loadMapsSession();
         const urlView = parseMapsUrl() || initialView;
+        const urlState = parseAppState() || initialAppState;
 
-        // 1) Restaurar direções + rota
+        const wantsDirections =
+          (urlState?.mode === 'directions' || urlState?.mode === 'nav') &&
+          (urlState?.dest || session?.dest);
+        const sessionDirections =
+          session?.mode === 'directions' || session?.mode === 'nav';
+
+        // 1) Restaurar direções / navegação (URL tem prioridade; sessão completa a rota)
         if (
-          session?.mode === 'directions' &&
-          session.dest &&
-          hasValidCoords(session.dest)
+          (wantsDirections || (!urlState && sessionDirections)) &&
+          (urlState?.dest || session?.dest) &&
+          hasValidCoords(urlState?.dest || session?.dest)
         ) {
+          const dest = hasValidCoords(urlState?.dest)
+            ? { ...(session?.dest || {}), ...urlState.dest }
+            : session.dest;
+          const originFromUrl = urlState?.originIsMyLocation
+            ? null
+            : urlState?.origin && hasValidCoords(urlState.origin)
+              ? { ...(session?.origin || {}), ...urlState.origin }
+              : null;
+          const origin =
+            originFromUrl ||
+            (session?.origin && hasValidCoords(session.origin)
+              ? session.origin
+              : null);
+
           searchMode.classList.add('hidden');
           directionsMode.classList.add('active');
           setDirectionsUiActive(true);
-          travelMode = session.travelMode || travelMode;
+          travelMode =
+            urlState?.travelMode || session?.travelMode || travelMode;
           travelModesEl
             ?.querySelectorAll('.travel-mode')
             ?.forEach((btn) => {
@@ -2589,41 +2665,75 @@
               btn.setAttribute('aria-selected', on ? 'true' : 'false');
             });
 
-          if (session.origin && hasValidCoords(session.origin)) {
+          if (urlState?.originIsMyLocation || session?.originIsMyLocation) {
+            originIsMyLocation = true;
+            sessionRestoring = false;
+            const coords = await requestUserLocation({ timeoutMs: 8000 });
+            sessionRestoring = true;
+            const me = myLocationPlace(coords) || origin;
+            if (me && hasValidCoords(me)) {
+              originField.setPlace(me);
+              setRoutePin('origin', me);
+            }
+          } else if (origin && hasValidCoords(origin)) {
             originIsMyLocation =
-              Boolean(session.originIsMyLocation) ||
-              session.origin.placeId === 'my-location';
-            originField.setPlace(session.origin);
-            setRoutePin('origin', session.origin);
+              origin.placeId === 'my-location' ||
+              Boolean(session?.originIsMyLocation);
+            originField.setPlace(origin);
+            setRoutePin('origin', origin);
           }
-          destField.setPlace(session.dest);
-          setRoutePin('dest', session.dest);
-          directionsResumePlace = session.place || session.dest;
 
-          if (Array.isArray(session.routes) && session.routes.length) {
-            lastRoutes = session.routes;
-            const idx = Math.max(
-              0,
-              Math.min(
-                session.selectedRouteIndex ?? 0,
-                session.routes.length - 1
-              )
-            );
-            routeLayer.setRoutes(session.routes, {
-              selectedIndex: idx,
+          destField.setPlace(dest);
+          setRoutePin('dest', dest);
+          directionsResumePlace = session?.place || dest;
+
+          const routes = session?.routes;
+          const idx = Math.max(
+            0,
+            urlState?.routeIndex ?? session?.selectedRouteIndex ?? 0
+          );
+          if (Array.isArray(routes) && routes.length) {
+            lastRoutes = routes;
+            const safeIdx = Math.min(idx, routes.length - 1);
+            routeLayer.setRoutes(routes, {
+              selectedIndex: safeIdx,
               fit: false
             });
-            applySelectedRoute(idx);
-          } else if (session.origin && hasValidCoords(session.origin)) {
+            applySelectedRoute(safeIdx);
+          } else if (
+            originField.getSelected() &&
+            hasValidCoords(originField.getSelected())
+          ) {
             sessionRestoring = false;
             await maybeDrawRoute();
             sessionRestoring = true;
           }
-          persistMapsSession();
+
+          // Continuar navegação se a URL / sessão dizem nav
+          if (urlState?.mode === 'nav' || session?.mode === 'nav') {
+            sessionRestoring = false;
+            await startNavigation();
+            sessionRestoring = true;
+          }
           return;
         }
 
-        // 2) Restaurar lugar da sessão (se perto da URL / ou sem URL)
+        // 2) Lugar na URL (pesquisa)
+        if (urlState?.place && hasValidCoords(urlState.place)) {
+          const place = {
+            ...(session?.place || {}),
+            ...urlState.place,
+            source: urlState.place.source || 'url'
+          };
+          selectedPlace = place;
+          setPlacePin(place, { fly: false });
+          setMapPickPin(place);
+          mainField.setPlace(place);
+          await showPlaceCard(place);
+          return;
+        }
+
+        // 3) Restaurar lugar da sessão (se perto da URL / ou sem URL)
         if (session?.place && hasValidCoords(session.place)) {
           const nearUrl =
             !urlView ||
@@ -2638,8 +2748,14 @@
           }
         }
 
-        // 3) Deep link: só câmara na URL → geocode + mostrar info
-        if (urlView) {
+        // 4) Deep link: só câmara na URL → geocode + mostrar info
+        if (
+          urlView &&
+          !urlState?.dest &&
+          !urlState?.place &&
+          urlState?.mode !== 'directions' &&
+          urlState?.mode !== 'nav'
+        ) {
           await openPlaceAtCoords(urlView.lat, urlView.lng, { fly: false });
         }
       } catch (err) {
@@ -3801,6 +3917,7 @@
           iconHtml: maneuverIconSvg('continue')
         });
         await navigation.start();
+        persistMapsSession();
       } catch (err) {
         console.warn('[maphaj] navigation start:', err);
         navigation.stop();
@@ -3811,6 +3928,7 @@
           { error: true }
         );
         setStartNavVisible(true);
+        persistMapsSession();
       } finally {
         btnStartNav.disabled = false;
       }
@@ -3822,6 +3940,8 @@
     btnStopNav.addEventListener('click', () => {
       navigation.stop();
       routeLayer.setNavigationMode(false);
+      setNavigationPins(false);
+      persistMapsSession();
     });
     btnNavRecenter.addEventListener('click', () => {
       navigation.resumeFollow();
@@ -3910,6 +4030,7 @@
         placeMarker = null;
       }
       clearMapsSession();
+      syncAppUrl();
       mainField.input.focus();
     });
 
@@ -3957,6 +4078,9 @@
     }
 
     // Refresh / deep link: restaurar lugar, rota ou geocode da URL
+    urlSync.onPopState = () => {
+      void restoreMapsSessionOrUrl();
+    };
     const bootRestore = async () => {
       if (!map.loaded()) {
         await new Promise((resolve) => map.once('load', resolve));
