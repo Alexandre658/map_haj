@@ -1624,11 +1624,6 @@
     .maphaj-marker-start .route-pin-card {
       top: 8px;
     }
-    .maphaj-marker-dest .route-pin-card {
-      top: 50%;
-      /* margin em vez de transform — evita conflito com o transform do MapLibre */
-      margin-top: -14px;
-    }
     .route-pin-text {
       overflow: hidden;
       text-overflow: ellipsis;
@@ -3080,7 +3075,7 @@
       return wrap;
     }
 
-    function makeDestPinElement(label) {
+    function makeDestPinElement() {
       const wrap = document.createElement('div');
       wrap.className = 'maphaj-marker-dest';
       wrap.innerHTML = `
@@ -3090,7 +3085,6 @@
             <circle cx="32" cy="32" r="10" fill="#FFFFFF"/>
           </svg>
         </div>`;
-      if (label) wrap.insertAdjacentHTML('beforeend', routePinCardHtml('Para', label));
       return wrap;
     }
 
@@ -3176,7 +3170,7 @@
         element:
           kind === 'origin'
             ? makeStartPinElement(shortPinLabel(place))
-            : makeDestPinElement(shortPinLabel(place)),
+            : makeDestPinElement(),
         anchor: kind === 'origin' ? 'bottom' : 'center',
         offset: kind === 'origin' ? [0, 2] : [0, 0]
       })
