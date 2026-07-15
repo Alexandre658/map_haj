@@ -30,6 +30,8 @@ export function bindPlaceSearchField({
   let currentResults = [];
   let selected = null;
   let lastMeta = {};
+  /** Depois de escolher um sítio, não reabrir a lista até o user voltar a editar. */
+  let suppressResults = false;
 
   function setLoading(on) {
     spinner?.classList.toggle('visible', !!on);
@@ -56,6 +58,16 @@ export function bindPlaceSearchField({
     onResultsChange?.({ open: false, source: null, count: 0 });
   }
 
+  function lockAfterSelect() {
+    suppressResults = true;
+    closeResults();
+    try {
+      input.blur();
+    } catch {
+      /* ignore */
+    }
+  }
+
   function shortMeta(place) {
     const raw = String(place.subtitle || place.address || '').trim();
     if (!raw) return '';
@@ -69,6 +81,7 @@ export function bindPlaceSearchField({
   }
 
   function renderResults(items, meta = {}) {
+    if (suppressResults) return;
     currentResults = items;
     activeIndex = -1;
     lastMeta = meta || {};
@@ -148,6 +161,7 @@ export function bindPlaceSearchField({
     getBias,
     onLoading: setLoading,
     onResults: (items, meta) => {
+      if (suppressResults) return;
       if (
         !input.value.trim() &&
         meta?.source !== 'history' &&
@@ -165,18 +179,20 @@ export function bindPlaceSearchField({
       selected = place;
       input.value = place.address || place.name;
       setClearVisible();
-      closeResults();
+      lockAfterSelect();
       onSelected?.(place);
     }
   });
 
   input.addEventListener('input', () => {
+    suppressResults = false;
     setClearVisible();
     selected = null;
     controller.onQueryInput(input.value);
   });
 
   input.addEventListener('focus', () => {
+    suppressResults = false;
     onFocus?.();
     if (!input.value.trim()) controller.showHistoryOnly();
   });
@@ -211,6 +227,7 @@ export function bindPlaceSearchField({
   clearBtn?.addEventListener('click', () => {
     input.value = '';
     selected = null;
+    suppressResults = false;
     setClearVisible();
     controller.clear();
     onCleared?.();
@@ -227,10 +244,13 @@ export function bindPlaceSearchField({
       selected = place;
       input.value = place?.address || place?.name || '';
       setClearVisible();
+      suppressResults = true;
+      closeResults();
     },
     clear() {
       input.value = '';
       selected = null;
+      suppressResults = false;
       setClearVisible();
       controller.clear();
     },

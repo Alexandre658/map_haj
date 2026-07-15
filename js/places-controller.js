@@ -94,6 +94,13 @@ export class PlacesSearchController {
   }
 
   async selectPlace(place) {
+    // Cancela pedidos em curso — evita reabrir autocomplete após escolher
+    this._generation += 1;
+    clearTimeout(this._uiTimer);
+    clearTimeout(this._apiTimer);
+    if (this._abort) this._abort.abort();
+    this.onLoading(false);
+
     let resolved = place;
     if (!hasValidCoords(resolved)) {
       this.onLoading(true);

@@ -3364,6 +3364,7 @@
     function setSearchEditing(on) {
       if (!on || !isMobileSearchUi()) {
         document.body.classList.remove('search-editing');
+        mainField?.closeResults?.();
         return;
       }
       document.body.classList.add('search-editing');
@@ -3382,10 +3383,12 @@
           const ae = document.activeElement;
           if (ae === mainField.input) return;
           if (ae?.closest?.('#mainSearch, #searchEditHeader')) return;
+          mainField.closeResults?.();
           setSearchEditing(false);
         }, 200);
       },
       onSelected: (place) => {
+        mainField.closeResults?.();
         setSearchEditing(false);
         setPlacePin(place);
         showPlaceCard(place);
