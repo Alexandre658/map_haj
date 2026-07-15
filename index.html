@@ -1245,15 +1245,16 @@
     }
     .map-settings-panel.open { display: block; }
 
-    /* Telemóvel: menu à direita da barra de pesquisa */
+    /* Telemóvel: menu à esquerda da barra de pesquisa */
     @media (max-width: 720px) {
       .ui {
-        right: 68px;
+        left: 68px;
+        right: 12px;
         max-width: none;
       }
       .map-settings-btn {
-        left: auto;
-        right: 12px;
+        left: 12px;
+        right: auto;
         top: 12px;
         bottom: auto;
         width: 48px;
@@ -1264,8 +1265,8 @@
       .map-settings-btn .ico-gear { display: none; }
       .map-settings-btn .ico-menu { display: block; }
       .map-settings-panel {
-        left: auto;
-        right: 12px;
+        left: 12px;
+        right: auto;
         top: 68px;
         bottom: auto;
         width: min(300px, calc(100vw - 24px));
