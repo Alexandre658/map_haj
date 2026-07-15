@@ -1,6 +1,7 @@
 /**
  * Pins origem/destino nativos (Symbol layer MapLibre).
- * Ícone PNG + texto "De … ›" / "Para … ›" com halo branco.
+ * Ícones PNG em assets/markers/ + label "De … ›" / "Para … ›".
+ * Clique / hover interativos via camada Symbol (melhor para N marcadores).
  */
 
 const SOURCE = 'maphaj-od-pins';
@@ -35,22 +36,30 @@ function emptyFc() {
 export class RoutePinsLayer {
   /**
    * @param {import('maplibre-gl').Map} map
+   * @param {{
+   *   onClick?: (info: { role: 'origin'|'dest', place: object, lngLat: {lng:number,lat:number} }) => void
+   * }} [opts]
    */
-  constructor(map) {
+  constructor(map, opts = {}) {
     this.map = map;
+    /** @type {((info: object) => void)|null} */
+    this.onClick = opts.onClick || null;
     /** @type {object|null} */
     this._origin = null;
     /** @type {object|null} */
     this._dest = null;
     this._imagesReady = false;
-    this._bound = false;
+    this._eventsBound = false;
 
     const boot = () => {
       void this.ensure();
     };
     if (map.isStyleLoaded()) boot();
     else map.once('load', boot);
-    map.on('style.load', boot);
+    map.on('style.load', () => {
+      this._eventsBound = false;
+      boot();
+    });
   }
 
   /**
@@ -64,11 +73,16 @@ export class RoutePinsLayer {
     );
   }
 
+  static get LAYER_ID() {
+    return LAYER;
+  }
+
   async ensure() {
     if (!this.map.getStyle()) return;
     try {
       await this._ensureImages();
       this._ensureSourceAndLayer();
+      this._bindEvents();
       this._paint();
     } catch (err) {
       console.warn('[maphaj] route pins:', err);
@@ -76,7 +90,11 @@ export class RoutePinsLayer {
   }
 
   async _ensureImages() {
-    if (this._imagesReady && this.map.hasImage(IMG_ORIGIN) && this.map.hasImage(IMG_DEST)) {
+    if (
+      this._imagesReady &&
+      this.map.hasImage(IMG_ORIGIN) &&
+      this.map.hasImage(IMG_DEST)
+    ) {
       return;
     }
     const load = async (id, url) => {
@@ -87,8 +105,14 @@ export class RoutePinsLayer {
         this.map.addImage(id, data, { pixelRatio: 2 });
       }
     };
-    await load(IMG_ORIGIN, new URL('../assets/markers/start-pin.png', import.meta.url).href);
-    await load(IMG_DEST, new URL('../assets/markers/dest-pin.png', import.meta.url).href);
+    await load(
+      IMG_ORIGIN,
+      new URL('../assets/markers/start-pin.png', import.meta.url).href
+    );
+    await load(
+      IMG_DEST,
+      new URL('../assets/markers/dest-pin.png', import.meta.url).href
+    );
     this._imagesReady = true;
   }
 
@@ -152,6 +176,31 @@ export class RoutePinsLayer {
       });
     }
     this.bringToFront();
+  }
+
+  _bindEvents() {
+    if (this._eventsBound || !this.map.getLayer(LAYER)) return;
+    this._eventsBound = true;
+
+    this.map.on('mouseenter', LAYER, () => {
+      this.map.getCanvas().style.cursor = 'pointer';
+    });
+    this.map.on('mouseleave', LAYER, () => {
+      this.map.getCanvas().style.cursor = '';
+    });
+    this.map.on('click', LAYER, (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      const role = f.properties?.role === 'origin' ? 'origin' : 'dest';
+      const place = role === 'origin' ? this._origin : this._dest;
+      if (!place) return;
+      const lngLat = e.lngLat || {
+        lng: f.geometry.coordinates[0],
+        lat: f.geometry.coordinates[1]
+      };
+      e.originalEvent?.stopPropagation?.();
+      this.onClick?.({ role, place, lngLat });
+    });
   }
 
   /** Garante que os pins ficam acima da polyline da rota. */

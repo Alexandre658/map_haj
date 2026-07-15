@@ -1859,6 +1859,8 @@
     });
     bindMapsUrl(map);
     const routePins = new RoutePinsLayer(map);
+    // onClick: ligado mais abaixo quando showPlaceCard existir
+    routePins.onClick = null;
     map.addControl(
       new maplibregl.AttributionControl({ compact: true }),
       'bottom-right'
@@ -3122,6 +3124,12 @@
         if (gen === placeCardGen) placeCard.classList.remove('loading');
       }
     }
+
+    // Clique nos pins nativos De/Para → abrir cartão do lugar
+    routePins.onClick = ({ place }) => {
+      if (!place || navigation?.active) return;
+      void showPlaceCard(place, { fromMap: directionsMode.classList.contains('active') });
+    };
 
     function hidePlaceCard({ keepSelected = false } = {}) {
       placeCardGen += 1;
