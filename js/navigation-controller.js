@@ -127,11 +127,31 @@ function pointAlongRoute(coordinates, alongMeters) {
 }
 
 function zoomForSpeed(speedMs) {
-  // Google aproxima-se em baixo e afasta em velocidade
-  if (speedMs == null || speedMs < 2) return 17.4;
-  if (speedMs < 8) return 16.8;
-  if (speedMs < 16) return 16.0;
-  return 15.4;
+  // Vista de cima (estilo Google Maps nav): afasta um pouco com velocidade
+  if (speedMs == null || speedMs < 2) return 17.0;
+  if (speedMs < 8) return 16.4;
+  if (speedMs < 16) return 15.7;
+  return 15.1;
+}
+
+/** Pitch baixo = planta (como a referência); ligeiro tilt só em movimento. */
+function pitchForSpeed(speedMs) {
+  if (speedMs == null || speedMs < 1.5) return 0;
+  if (speedMs < 8) return 12;
+  if (speedMs < 16) return 18;
+  return 22;
+}
+
+/** Padding: puck baixo no ecrã, rota a frente a ocupar o centro. */
+function navCameraPadding() {
+  return { top: 96, bottom: 220, left: 0, right: 0 };
+}
+
+function lookAheadMeters(speedMs) {
+  if (speedMs > 12) return 70;
+  if (speedMs > 5) return 48;
+  if (speedMs > 2) return 32;
+  return 22;
 }
 
 /**
@@ -434,7 +454,7 @@ export class NavigationController {
   }
 
   /**
-   * Aplica vista 3D de navegação (pitch + zoom + bearing da rota).
+   * Vista de navegação estilo Google: rota “para cima”, pitch baixo (planta).
    */
   _enter3D() {
     if (!this._coordinates || this._coordinates.length < 2) return;
@@ -462,15 +482,20 @@ export class NavigationController {
 
     this._programmaticCamera = true;
     try {
-      const center = offsetByBearing(lngLat[0], lngLat[1], heading, 45);
+      const center = offsetByBearing(
+        lngLat[0],
+        lngLat[1],
+        heading,
+        lookAheadMeters(0)
+      );
       this.map.easeTo({
         center,
         bearing: heading,
-        pitch: 65,
-        zoom: 17.2,
+        pitch: pitchForSpeed(0),
+        zoom: zoomForSpeed(0),
         duration: 900,
         essential: true,
-        padding: { top: 160, bottom: 140, left: 0, right: 0 }
+        padding: navCameraPadding()
       });
     } catch {
       /* ignore */
@@ -568,17 +593,21 @@ export class NavigationController {
   _applyCameraFrame(d) {
     if (!this._following || this._userInteracting) return;
     const speed = d.speed || 0;
-    const lookAhead = speed > 12 ? 95 : speed > 5 ? 65 : speed > 2 ? 48 : 36;
-    const center = offsetByBearing(d.lng, d.lat, d.heading, lookAhead);
+    const center = offsetByBearing(
+      d.lng,
+      d.lat,
+      d.heading,
+      lookAheadMeters(speed)
+    );
     // jumpTo é síncrono — não deixar _programmaticCamera preso (bloqueava gestos).
     this._programmaticCamera = true;
     try {
       this.map.jumpTo({
         center,
         bearing: d.heading,
-        pitch: 65,
-        zoom: Math.max(zoomForSpeed(speed), 16.6),
-        padding: { top: 160, bottom: 140, left: 0, right: 0 }
+        pitch: pitchForSpeed(speed),
+        zoom: zoomForSpeed(speed),
+        padding: navCameraPadding()
       });
     } catch {
       /* ignore */
@@ -1009,17 +1038,21 @@ export class NavigationController {
   _updateCamera(lngLat, heading, speedMs, opts = {}) {
     if (!opts.force && (!this._following || this._userInteracting)) return;
     this._programmaticCamera = true;
-    const lookAhead = speedMs > 8 ? 90 : speedMs > 3 ? 55 : 40;
-    const center = offsetByBearing(lngLat[0], lngLat[1], heading, lookAhead);
+    const center = offsetByBearing(
+      lngLat[0],
+      lngLat[1],
+      heading,
+      lookAheadMeters(speedMs)
+    );
     try {
       this.map.easeTo({
         center,
         bearing: heading,
-        pitch: 65,
-        zoom: Math.max(zoomForSpeed(speedMs), 16.5),
+        pitch: pitchForSpeed(speedMs),
+        zoom: zoomForSpeed(speedMs),
         duration: opts.duration ?? 700,
         essential: true,
-        padding: { top: 160, bottom: 140, left: 0, right: 0 }
+        padding: navCameraPadding()
       });
     } catch {
       /* ignore */
