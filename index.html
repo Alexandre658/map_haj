@@ -3105,51 +3105,32 @@
       return n || 'Local';
     }
 
-    function makeMarker(kind, place) {
-      // Origem / início / lugar seleccionado → pin Moveme com haste (+ cartão "De" em direções)
-      if (kind === 'origin' || kind === 'start') {
-        return new maplibregl.Marker({
-          element: makeStartPinElement(shortPinLabel(place)),
-          anchor: 'bottom',
-          offset: [0, 2]
-        });
-      }
-
-      if (kind === 'place') {
-        return new maplibregl.Marker({
-          element: makeStartPinElement(),
-          anchor: 'bottom',
-          offset: [0, 2]
-        });
-      }
-
-      // Destino → círculo Moveme + cartão "Para"
-      if (kind === 'dest') {
-        return new maplibregl.Marker({
-          element: makeDestPinElement(shortPinLabel(place)),
-          anchor: 'center'
-        });
-      }
-
-      const el = document.createElement('div');
-      el.className = `maphaj-marker ${kind}`;
-      return new maplibregl.Marker({ element: el, anchor: 'bottom' });
-    }
-
     function setPlacePin(place, { fly = true } = {}) {
-      if (placeMarker) placeMarker.remove();
-      placeMarker = null;
-      if (!place) return;
-      placeMarker = makeMarker('place')
-        .setLngLat([place.lng, place.lat])
+      if (placeMarker) {
+        placeMarker.remove();
+        placeMarker = null;
+      }
+      if (!place || place.lat == null || place.lng == null) return;
+
+      placeMarker = new maplibregl.Marker({
+        element: makeStartPinElement(),
+        anchor: 'bottom',
+        offset: [0, 2]
+      })
+        .setLngLat([Number(place.lng), Number(place.lat)])
         .setPopup(
           new maplibregl.Popup({ offset: 16 }).setText(
             place.address ? `${place.name} — ${place.address}` : place.name
           )
         )
         .addTo(map);
+
       if (fly) {
-        map.flyTo({ center: [place.lng, place.lat], zoom: 15, essential: true });
+        map.flyTo({
+          center: [Number(place.lng), Number(place.lat)],
+          zoom: 15,
+          essential: true
+        });
       }
       setActive(null);
     }
@@ -3165,23 +3146,41 @@
         return;
       }
 
-      const markerKind = kind === 'origin' ? 'origin' : 'dest';
-      let markerRef = kind === 'origin' ? originMarker : destMarker;
-
-      if (markerRef) {
-        markerRef.remove();
-        markerRef = null;
+      if (kind === 'origin') {
+        if (originMarker) {
+          originMarker.remove();
+          originMarker = null;
+        }
+      } else if (destMarker) {
+        destMarker.remove();
+        destMarker = null;
       }
 
       if (!place || place.lat == null || place.lng == null) {
-        if (kind === 'origin') originMarker = null;
-        else destMarker = null;
         routePins.setPin(kind, null);
         return;
       }
 
-      const marker = makeMarker(markerKind, place)
-        .setLngLat([Number(place.lng), Number(place.lat)])
+      const lng = Number(place.lng);
+      const lat = Number(place.lat);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        routePins.setPin(kind, null);
+        return;
+      }
+
+      // Igual ao exemplo MapLibre:
+      // const marker = new maplibregl.Marker()
+      //   .setLngLat([lng, lat])
+      //   .addTo(map);
+      const marker = new maplibregl.Marker({
+        element:
+          kind === 'origin'
+            ? makeStartPinElement(shortPinLabel(place))
+            : makeDestPinElement(shortPinLabel(place)),
+        anchor: kind === 'origin' ? 'bottom' : 'center',
+        offset: kind === 'origin' ? [0, 2] : [0, 0]
+      })
+        .setLngLat([lng, lat])
         .addTo(map);
 
       marker.on('click', (e) => {
@@ -3195,7 +3194,6 @@
       if (kind === 'origin') originMarker = marker;
       else destMarker = marker;
 
-      // Limpa residual da Symbol layer (migração antiga)
       routePins.setPin(kind, null);
     }
 
@@ -3408,11 +3406,16 @@
     function setMapPickPin(place) {
       clearMapPickMarker();
       if (!place || place.lat == null || place.lng == null) return;
+      const lng = Number(place.lng);
+      const lat = Number(place.lat);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+
       mapPickMarker = new maplibregl.Marker({
         element: makeStartPinElement(),
-        anchor: 'bottom'
+        anchor: 'bottom',
+        offset: [0, 2]
       })
-        .setLngLat([place.lng, place.lat])
+        .setLngLat([lng, lat])
         .addTo(map);
     }
 
