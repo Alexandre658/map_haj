@@ -1404,6 +1404,7 @@
       serializeRoutes,
       approxDistanceMeters
     } from './js/maps-session.js';
+    import { RoutePinsLayer } from './js/route-pins-layer.js';
 
     const config = loadPlacesConfig();
     const placesClient = new PlacesSearchClient(config);
@@ -1425,6 +1426,7 @@
       maxBounds: [[8.0, -20.5], [27.5, -2.0]]
     });
     bindMapsUrl(map);
+    const routePins = new RoutePinsLayer(map);
     map.addControl(
       new maplibregl.AttributionControl({ compact: true }),
       'bottom-right'
@@ -2239,11 +2241,13 @@
                 Math.max(0, Math.min(selectedIndex, preserved.length - 1))
               );
             }
-            // Pins HTML: reaplicar para garantir após troca de estilo
-            if (origin) setRoutePin('origin', origin);
-            if (dest) setRoutePin('dest', dest);
-            else if (selectedPlace && !directionsMode.classList.contains('active')) {
-              // marker do lugar em modo pesquisa
+            // Pins nativos (Symbol): reaplicar após setStyle
+            void routePins.ensure().then(() => {
+              if (origin) setRoutePin('origin', origin);
+              if (dest) setRoutePin('dest', dest);
+            });
+            if (!origin && !dest && selectedPlace && !directionsMode.classList.contains('active')) {
+              // marker do lugar em modo pesquisa (HTML)
               if (placeMarker) {
                 placeMarker.remove();
                 placeMarker = null;
@@ -2410,37 +2414,27 @@
     function setRoutePin(kind, place) {
       // Em navegação nunca mostrar pin de start (origem)
       if (kind === 'origin' && navigation?.active) {
+        routePins.setPin('origin', null);
         if (originMarker) {
           originMarker.remove();
           originMarker = null;
         }
         return;
       }
-      const existing = kind === 'origin' ? originMarker : destMarker;
-      if (existing) existing.remove();
-      if (!place) {
-        if (kind === 'origin') originMarker = null;
-        else destMarker = null;
-        return;
+      // Remover residual HTML antigo (migração)
+      if (kind === 'origin' && originMarker) {
+        originMarker.remove();
+        originMarker = null;
       }
-      const marker = makeMarker(kind, place)
-        .setLngLat([place.lng, place.lat])
-        .addTo(map);
-      if (kind === 'origin') originMarker = marker;
-      else destMarker = marker;
+      if (kind === 'dest' && destMarker) {
+        destMarker.remove();
+        destMarker = null;
+      }
+      routePins.setPin(kind, place || null);
     }
 
-    /**
-     * Só cliques exactos no mapa ficam “precisos”.
-     * Bairros/cidades (Camama, etc.) NÃO — mesmo que a API mande point_of_interest.
-     */
     function isPreciseMapPlace(place) {
-      if (!place) return false;
-      if (place.precise === true && String(place.source || '') === 'map-click') {
-        return true;
-      }
-      if (String(place.source || '') === 'map-click') return true;
-      return false;
+      return RoutePinsLayer.isMapClickPrecise(place);
     }
 
     /**
