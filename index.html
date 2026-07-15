@@ -2226,18 +2226,13 @@
           originMarker = null;
         }
         originPinHiddenForNav = true;
-        const dest = destField?.getSelected?.();
-        if (dest && hasValidCoords(dest)) {
-          setRoutePin('dest', dest);
-        }
+        // Destino na ponta da polyline (não no centroide do lugar)
+        refreshRoutePins();
         return;
       }
       if (originPinHiddenForNav) {
         originPinHiddenForNav = false;
-        const origin = originField?.getSelected?.();
-        if (origin && hasValidCoords(origin)) {
-          setRoutePin('origin', origin);
-        }
+        refreshRoutePins();
       }
     }
 
@@ -2809,10 +2804,38 @@
       if (originIsMyLocation && directionsMode.classList.contains('active')) {
         const place = myLocationPlace();
         originField.setPlace(place);
-        setRoutePin('origin', place);
-        void maybeDrawRoute();
+        // Não chamar setRoutePin aqui: o GPS fica fora da polyline e o dest
+        // seria reposto no sítio errado. Recalcula e refreshRoutePins alinha.
+        void scheduleRouteRefreshFromGps();
       }
     });
+
+    let gpsRouteTimer = null;
+    let lastGpsRouteAt = 0;
+    let lastGpsRouteLL = null;
+
+    function scheduleRouteRefreshFromGps() {
+      const now = Date.now();
+      const ll = userLocation;
+      if (ll && lastGpsRouteLL) {
+        const dLat = ll.lat - lastGpsRouteLL.lat;
+        const dLng = ll.lng - lastGpsRouteLL.lng;
+        const movedM =
+          Math.sqrt(dLat * dLat + dLng * dLng) * 111_320;
+        // Movimento pequeno: só realinha pins (origem no start da rota)
+        if (movedM < 28 && now - lastGpsRouteAt < 8000) {
+          refreshRoutePins();
+          return;
+        }
+      }
+      if (gpsRouteTimer) clearTimeout(gpsRouteTimer);
+      gpsRouteTimer = setTimeout(() => {
+        gpsRouteTimer = null;
+        lastGpsRouteAt = Date.now();
+        lastGpsRouteLL = userLocation ? { ...userLocation } : null;
+        void maybeDrawRoute();
+      }, 900);
+    }
 
     geolocate.on('error', (err) => {
       console.warn('[maphaj] Geolocalização:', err?.message || err);
@@ -2940,12 +2963,9 @@
               applySelectedRoute(
                 Math.max(0, Math.min(selectedIndex, preserved.length - 1))
               );
+            } else {
+              refreshRoutePins();
             }
-            // Pins nativos (Symbol): reaplicar após setStyle
-            void routePins.ensure().then(() => {
-              if (origin) setRoutePin('origin', origin);
-              if (dest) setRoutePin('dest', dest);
-            });
             if (!origin && !dest && selectedPlace && !directionsMode.classList.contains('active')) {
               // marker do lugar em modo pesquisa (HTML)
               if (placeMarker) {
@@ -3181,6 +3201,43 @@
           });
         }
       }
+    }
+
+    /**
+     * Pins sempre no extremo da rota activa; se não há rota, usa o lugar.
+     * Evita o bug: GPS/setStyle repõe o destino no centroide longe da polyline.
+     */
+    function refreshRoutePins() {
+      const selected =
+        routeLayer.getSelectedRoute?.() ||
+        (Array.isArray(lastRoutes) && lastRoutes.length
+          ? lastRoutes[
+              Math.max(
+                0,
+                Math.min(
+                  routeLayer.getSelectedIndex?.() ?? 0,
+                  lastRoutes.length - 1
+                )
+              )
+            ]
+          : null);
+      if (
+        selected &&
+        Array.isArray(selected.coordinates) &&
+        selected.coordinates.length >= 2
+      ) {
+        alignPinsToRouteGeometry(selected);
+        return;
+      }
+      const origin = originField?.getSelected?.();
+      const dest = destField?.getSelected?.();
+      if (origin && hasValidCoords(origin) && !navigation?.active) {
+        setRoutePin('origin', origin);
+      } else {
+        setRoutePin('origin', null);
+      }
+      if (dest && hasValidCoords(dest)) setRoutePin('dest', dest);
+      else setRoutePin('dest', null);
     }
 
     function escapeAttr(s) {
