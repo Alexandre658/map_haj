@@ -566,9 +566,11 @@ export class NavigationController {
    * @param {{ lng: number, lat: number, heading: number, speed: number }} d
    */
   _applyCameraFrame(d) {
+    if (!this._following || this._userInteracting) return;
     const speed = d.speed || 0;
     const lookAhead = speed > 12 ? 95 : speed > 5 ? 65 : speed > 2 ? 48 : 36;
     const center = offsetByBearing(d.lng, d.lat, d.heading, lookAhead);
+    // jumpTo é síncrono — não deixar _programmaticCamera preso (bloqueava gestos).
     this._programmaticCamera = true;
     try {
       this.map.jumpTo({
@@ -580,6 +582,8 @@ export class NavigationController {
       });
     } catch {
       /* ignore */
+    } finally {
+      this._programmaticCamera = false;
     }
   }
 
@@ -650,29 +654,42 @@ export class NavigationController {
     });
   }
 
+  /** Para o follow quando o utilizador toca/arrasta o mapa. */
+  _breakFollowFromUser() {
+    if (!this._active || this._programmaticCamera) return;
+    this._userInteracting = true;
+    if (!this._following) return;
+    this._following = false;
+    this.onFollowChange?.(false);
+    this.onUpdate?.({
+      active: true,
+      following: false,
+      keepHud: true
+    });
+  }
+
   _bindMapInteraction() {
     this._unbindMapInteraction();
-    this._dragStartHandler = () => {
-      if (!this._active || this._programmaticCamera) return;
-      this._userInteracting = true;
-      if (this._following) {
-        this._following = false;
-        this.onFollowChange?.(false);
-        this.onUpdate?.({
-          active: true,
-          following: false,
-          keepHud: true
-        });
-      }
-    };
+    this._dragStartHandler = () => this._breakFollowFromUser();
     this._dragEndHandler = () => {
       if (this._programmaticCamera) return;
       this._userInteracting = false;
     };
+    // Touch/mousedown: libertar follow já no 1º contacto (antes do dragstart),
+    // senão o jumpTo a ~60fps impede o gesto de arrastar.
+    this._pointerDownHandler = () => this._breakFollowFromUser();
     this.map.on('dragstart', this._dragStartHandler);
     this.map.on('dragend', this._dragEndHandler);
     this.map.on('rotatestart', this._dragStartHandler);
     this.map.on('pitchstart', this._dragStartHandler);
+    const canvas = this.map.getCanvas?.();
+    if (canvas) {
+      canvas.addEventListener('touchstart', this._pointerDownHandler, {
+        passive: true
+      });
+      canvas.addEventListener('mousedown', this._pointerDownHandler);
+      this._interactionCanvas = canvas;
+    }
   }
 
   _unbindMapInteraction() {
@@ -686,6 +703,18 @@ export class NavigationController {
       this.map.off('dragend', this._dragEndHandler);
       this._dragEndHandler = null;
     }
+    if (this._interactionCanvas && this._pointerDownHandler) {
+      this._interactionCanvas.removeEventListener(
+        'touchstart',
+        this._pointerDownHandler
+      );
+      this._interactionCanvas.removeEventListener(
+        'mousedown',
+        this._pointerDownHandler
+      );
+    }
+    this._interactionCanvas = null;
+    this._pointerDownHandler = null;
   }
 
   /**
