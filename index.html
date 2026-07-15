@@ -1031,7 +1031,8 @@
     .maphaj-marker.place { background: #ea4335; }
     .maphaj-marker.dest { background: #ea4335; }
 
-    /* Marcador de início / pesquisa — pin azul com haste */
+    /* Marcador de início / pesquisa — pin azul com haste
+       Caixa FIXA = âncora MapLibre; cartão absolutamente fora (não desloca o geo) */
     .maphaj-marker-start {
       position: relative;
       width: 40px;
@@ -1043,15 +1044,22 @@
       pointer-events: none;
       line-height: 0;
       overflow: visible;
+      flex-shrink: 0;
     }
-    .maphaj-marker-start svg {
+    .maphaj-marker-start .maphaj-marker-icon {
+      width: 40px;
+      height: 52px;
+      display: block;
+      line-height: 0;
+    }
+    .maphaj-marker-start .maphaj-marker-icon svg {
       width: 40px;
       height: 52px;
       display: block;
       overflow: visible;
     }
 
-    /* Marcador de destino — círculo Moveme */
+    /* Marcador de destino — círculo Moveme (caixa fixa 28×28) */
     .maphaj-marker-dest {
       position: relative;
       width: 28px;
@@ -1063,15 +1071,22 @@
       pointer-events: none;
       line-height: 0;
       overflow: visible;
+      flex-shrink: 0;
     }
-    .maphaj-marker-dest svg {
+    .maphaj-marker-dest .maphaj-marker-icon {
+      width: 28px;
+      height: 28px;
+      display: block;
+      line-height: 0;
+    }
+    .maphaj-marker-dest .maphaj-marker-icon svg {
       width: 28px;
       height: 28px;
       display: block;
       overflow: visible;
     }
 
-    /* Cartões "De" / "Para" ao lado dos pins (estilo Uber) */
+    /* Cartões "De" / "Para" — absolutos, sem transformar o root do Marker */
     .route-pin-card {
       position: absolute;
       left: calc(100% + 6px);
@@ -1090,13 +1105,15 @@
       line-height: 1.25;
       white-space: nowrap;
       pointer-events: none;
+      z-index: 2;
     }
     .maphaj-marker-start .route-pin-card {
-      top: 10px;
+      top: 8px;
     }
     .maphaj-marker-dest .route-pin-card {
       top: 50%;
-      transform: translateY(-50%);
+      /* margin em vez de transform — evita conflito com o transform do MapLibre */
+      margin-top: -14px;
     }
     .route-pin-text {
       overflow: hidden;
@@ -2290,33 +2307,28 @@
       const id = `mh${++pinSeq}`;
       const wrap = document.createElement('div');
       wrap.className = 'maphaj-marker-start';
-      // SVG nítido: sem filter CSS, sombra hard no SVG, contraste alto
       wrap.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 104" width="40" height="52" aria-hidden="true" shape-rendering="geometricPrecision">
-          <defs>
-            <linearGradient id="${id}Head" x1="20%" y1="10%" x2="80%" y2="90%">
-              <stop offset="0%" stop-color="#4A9BFF"/>
-              <stop offset="55%" stop-color="#1A73E8"/>
-              <stop offset="100%" stop-color="#0D47C4"/>
-            </linearGradient>
-            <linearGradient id="${id}Stem" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#1A73E8"/>
-              <stop offset="100%" stop-color="#0A3A9E"/>
-            </linearGradient>
-          </defs>
-          <!-- sombra no chão (opaca, sem blur) -->
-          <ellipse cx="40" cy="98" rx="10" ry="3" fill="#000" fill-opacity="0.22"/>
-          <!-- haste -->
-          <rect x="37" y="56" width="6" height="40" rx="2" fill="url(#${id}Stem)"/>
-          <!-- cabeça -->
-          <circle cx="40" cy="34" r="26" fill="url(#${id}Head)"/>
-          <!-- reflexo nítido -->
-          <path d="M26 22a16 16 0 0 1 18-8" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"/>
-          <!-- núcleo branco -->
-          <circle cx="40" cy="34" r="10" fill="#fff"/>
-          <!-- base da haste -->
-          <circle cx="40" cy="97" r="2.5" fill="#1A1A1A"/>
-        </svg>`;
+        <div class="maphaj-marker-icon" aria-hidden="true">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 104" width="40" height="52" shape-rendering="geometricPrecision">
+            <defs>
+              <linearGradient id="${id}Head" x1="20%" y1="10%" x2="80%" y2="90%">
+                <stop offset="0%" stop-color="#4A9BFF"/>
+                <stop offset="55%" stop-color="#1A73E8"/>
+                <stop offset="100%" stop-color="#0D47C4"/>
+              </linearGradient>
+              <linearGradient id="${id}Stem" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#1A73E8"/>
+                <stop offset="100%" stop-color="#0A3A9E"/>
+              </linearGradient>
+            </defs>
+            <ellipse cx="40" cy="98" rx="10" ry="3" fill="#000" fill-opacity="0.22"/>
+            <rect x="37" y="56" width="6" height="40" rx="2" fill="url(#${id}Stem)"/>
+            <circle cx="40" cy="34" r="26" fill="url(#${id}Head)"/>
+            <path d="M26 22a16 16 0 0 1 18-8" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="40" cy="34" r="10" fill="#fff"/>
+            <circle cx="40" cy="97" r="2.5" fill="#1A1A1A"/>
+          </svg>
+        </div>`;
       if (label) wrap.insertAdjacentHTML('beforeend', routePinCardHtml('De', label));
       return wrap;
     }
@@ -2325,10 +2337,12 @@
       const wrap = document.createElement('div');
       wrap.className = 'maphaj-marker-dest';
       wrap.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="28" height="28" aria-hidden="true" shape-rendering="geometricPrecision">
-          <circle cx="32" cy="32" r="28" fill="#1A73E8"/>
-          <circle cx="32" cy="32" r="10" fill="#FFFFFF"/>
-        </svg>`;
+        <div class="maphaj-marker-icon" aria-hidden="true">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="28" height="28" shape-rendering="geometricPrecision">
+            <circle cx="32" cy="32" r="28" fill="#1A73E8"/>
+            <circle cx="32" cy="32" r="10" fill="#FFFFFF"/>
+          </svg>
+        </div>`;
       if (label) wrap.insertAdjacentHTML('beforeend', routePinCardHtml('Para', label));
       return wrap;
     }
@@ -2417,40 +2431,22 @@
     }
 
     /**
-     * Lugar “impreciso” (bairro/cidade) → pin pode ir ao fim da rota.
-     * Clique no mapa / morada exacta → pin fica no ponto escolhido.
+     * Só cliques exactos no mapa ficam “precisos”.
+     * Bairros/cidades (Camama, etc.) NÃO — mesmo que a API mande point_of_interest.
      */
     function isPreciseMapPlace(place) {
       if (!place) return false;
-      if (place.precise === true) return true;
-      const src = String(place.source || '');
-      if (src === 'map-click' || src === 'map' || src === 'url') return true;
-      const types = (place.types || []).map((t) => String(t).toLowerCase());
-      if (
-        types.some((t) =>
-          /street_address|premise|subpremise|establishment|point_of_interest|store|parking|intersection|route/.test(
-            t
-          )
-        )
-      ) {
+      if (place.precise === true && String(place.source || '') === 'map-click') {
         return true;
       }
-      if (
-        types.some((t) =>
-          /locality|sublocality|neighborhood|administrative_area|country|political|colloquial_area/.test(
-            t
-          )
-        )
-      ) {
-        return false;
-      }
+      if (String(place.source || '') === 'map-click') return true;
       return false;
     }
 
     /**
-     * Places devolve centroides (ex.: bairro "Camama"); o routing termina
-     * na estrada mais próxima. Alinha pins só quando o lugar é impreciso —
-     * cliques no mapa / POIs exactos mantêm o ponto escolhido.
+     * Alinha pins ao início/fim da polyline.
+     * Clique map-click: mantém o ponto.
+     * Resto (pesquisa Camama, GPS…): pin no extremo da rota.
      * @param {object|null} route
      */
     function alignPinsToRouteGeometry(route) {
@@ -2461,16 +2457,20 @@
       const end = coords[coords.length - 1];
       if (!start || !end) return;
 
+      // Evita pin extra (pesquisa / clique) a “flutuar” longe da rota
+      clearMapPickMarker();
+      if (placeMarker) {
+        placeMarker.remove();
+        placeMarker = null;
+      }
+
       const origin = originField?.getSelected?.();
       const dest = destField?.getSelected?.();
 
       if (origin && hasValidCoords(origin) && !navigation?.active) {
-        // GPS / "sua localização": alinhar ao arranque da rota
-        const snapOrigin =
-          origin.placeId === 'my-location' ||
-          originIsMyLocation ||
-          !isPreciseMapPlace(origin);
-        if (snapOrigin) {
+        if (isPreciseMapPlace(origin)) {
+          setRoutePin('origin', origin);
+        } else {
           setRoutePin('origin', {
             ...origin,
             lng: start[0],
@@ -2480,15 +2480,8 @@
       }
       if (dest && hasValidCoords(dest)) {
         if (isPreciseMapPlace(dest)) {
-          // Mantém o ponto clicado / morada exacta
           setRoutePin('dest', dest);
-          return;
-        }
-        const gap = approxDistanceMeters(dest, {
-          lat: end[1],
-          lng: end[0]
-        });
-        if (gap > 60) {
+        } else {
           setRoutePin('dest', {
             ...dest,
             lng: end[0],
