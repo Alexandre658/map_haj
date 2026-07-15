@@ -1379,6 +1379,14 @@
     import { NavigationController } from './js/navigation-controller.js';
     import { maneuverIconSvg } from './js/route-maneuvers.js';
     import { parseMapsUrl, bindMapsUrl } from './js/maps-url.js';
+    import {
+      loadMapsSession,
+      saveMapsSession,
+      clearMapsSession,
+      serializePlace,
+      serializeRoutes,
+      approxDistanceMeters
+    } from './js/maps-session.js';
 
     const config = loadPlacesConfig();
     const placesClient = new PlacesSearchClient(config);
@@ -1900,6 +1908,178 @@
     let routeGen = 0;
     /** true se a origem actual é "A sua localização" (actualiza com GPS) */
     let originIsMyLocation = false;
+    /** Evita gravar sessão durante restore */
+    let sessionRestoring = false;
+
+    function persistMapsSession() {
+      if (sessionRestoring) return;
+      try {
+        const c = map.getCenter();
+        const inDir = directionsMode.classList.contains('active');
+        const origin = originField?.getSelected?.() || null;
+        const dest = destField?.getSelected?.() || null;
+        saveMapsSession({
+          v: 1,
+          updatedAt: Date.now(),
+          view: {
+            lat: c.lat,
+            lng: c.lng,
+            zoom: map.getZoom()
+          },
+          mode: inDir ? 'directions' : 'search',
+          travelMode,
+          place: serializePlace(selectedPlace),
+          origin: serializePlace(origin),
+          dest: serializePlace(dest),
+          originIsMyLocation: Boolean(originIsMyLocation),
+          routes: inDir ? serializeRoutes(lastRoutes) : null,
+          selectedRouteIndex: (() => {
+            try {
+              const routes = routeLayer.getRoutes();
+              const sel = routeLayer.getSelectedRoute();
+              const i = routes.findIndex((r) => r === sel);
+              return i >= 0 ? i : 0;
+            } catch {
+              return 0;
+            }
+          })()
+        });
+      } catch (err) {
+        console.warn('[maphaj] persist:', err);
+      }
+    }
+
+    /**
+     * Abre pin + cartão num ponto (ex.: deep link /maps/@lat,lng,z).
+     */
+    async function openPlaceAtCoords(lat, lng, { fly = false } = {}) {
+      const fallback = {
+        placeId: `map-coord-${lat.toFixed(5)}-${lng.toFixed(5)}`,
+        name: 'Local no mapa',
+        address: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+        lat,
+        lng,
+        types: ['point_of_interest'],
+        source: 'url'
+      };
+      placeCard.classList.add('visible', 'loading');
+      placeCard.classList.remove('dir-context');
+      document.getElementById('placeCardTitle').textContent = 'A obter local…';
+      document.getElementById('placeCardMeta').innerHTML = '';
+      document.getElementById('placeCardAddress').textContent = '';
+      document.getElementById('placeCardFacts').innerHTML = '';
+
+      let place = fallback;
+      try {
+        const fromApi = await placesClient.fromCoordinates({
+          lat,
+          lng,
+          maxResults: 1
+        });
+        if (fromApi && hasValidCoords(fromApi)) {
+          place = {
+            ...fromApi,
+            lat: fromApi.lat ?? lat,
+            lng: fromApi.lng ?? lng
+          };
+        }
+      } catch (err) {
+        console.warn('[maphaj] url place:', err);
+      }
+
+      setPlacePin(place, { fly });
+      setMapPickPin(place);
+      if (mainField?.setPlace) {
+        mainField.setPlace(place);
+      }
+      await showPlaceCard(place, { fromMap: false });
+      persistMapsSession();
+      return place;
+    }
+
+    async function restoreMapsSessionOrUrl() {
+      sessionRestoring = true;
+      try {
+        const session = loadMapsSession();
+        const urlView = parseMapsUrl() || initialView;
+
+        // 1) Restaurar direções + rota
+        if (
+          session?.mode === 'directions' &&
+          session.dest &&
+          hasValidCoords(session.dest)
+        ) {
+          searchMode.classList.add('hidden');
+          directionsMode.classList.add('active');
+          travelMode = session.travelMode || travelMode;
+          travelModesEl
+            ?.querySelectorAll('.travel-mode')
+            ?.forEach((btn) => {
+              const on = btn.dataset.mode === travelMode;
+              btn.classList.toggle('active', on);
+              btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+
+          if (session.origin && hasValidCoords(session.origin)) {
+            originIsMyLocation =
+              Boolean(session.originIsMyLocation) ||
+              session.origin.placeId === 'my-location';
+            originField.setPlace(session.origin);
+            setRoutePin('origin', session.origin);
+          }
+          destField.setPlace(session.dest);
+          setRoutePin('dest', session.dest);
+          directionsResumePlace = session.place || session.dest;
+
+          if (Array.isArray(session.routes) && session.routes.length) {
+            lastRoutes = session.routes;
+            const idx = Math.max(
+              0,
+              Math.min(
+                session.selectedRouteIndex ?? 0,
+                session.routes.length - 1
+              )
+            );
+            routeLayer.setRoutes(session.routes, {
+              selectedIndex: idx,
+              fit: false
+            });
+            applySelectedRoute(idx);
+          } else if (session.origin && hasValidCoords(session.origin)) {
+            sessionRestoring = false;
+            await maybeDrawRoute();
+            sessionRestoring = true;
+          }
+          persistMapsSession();
+          return;
+        }
+
+        // 2) Restaurar lugar da sessão (se perto da URL / ou sem URL)
+        if (session?.place && hasValidCoords(session.place)) {
+          const nearUrl =
+            !urlView ||
+            approxDistanceMeters(session.place, urlView) < 250;
+          if (nearUrl || !urlView) {
+            selectedPlace = session.place;
+            setPlacePin(session.place, { fly: false });
+            setMapPickPin(session.place);
+            mainField.setPlace(session.place);
+            await showPlaceCard(session.place);
+            return;
+          }
+        }
+
+        // 3) Deep link: só câmara na URL → geocode + mostrar info
+        if (urlView) {
+          await openPlaceAtCoords(urlView.lat, urlView.lng, { fly: false });
+        }
+      } catch (err) {
+        console.warn('[maphaj] restore:', err);
+      } finally {
+        sessionRestoring = false;
+        persistMapsSession();
+      }
+    }
 
     geolocate.on('geolocate', (e) => {
       userLocation = { lat: e.coords.latitude, lng: e.coords.longitude };
@@ -2194,7 +2374,7 @@
       return new maplibregl.Marker({ element: el, anchor: 'bottom' });
     }
 
-    function setPlacePin(place) {
+    function setPlacePin(place, { fly = true } = {}) {
       if (placeMarker) placeMarker.remove();
       placeMarker = null;
       if (!place) return;
@@ -2206,7 +2386,9 @@
           )
         )
         .addTo(map);
-      map.flyTo({ center: [place.lng, place.lat], zoom: 15, essential: true });
+      if (fly) {
+        map.flyTo({ center: [place.lng, place.lat], zoom: 15, essential: true });
+      }
       setActive(null);
     }
 
@@ -2327,6 +2509,7 @@
       placeCard.classList.toggle('dir-context', inDirections || fromMap);
       placeCard.classList.add('visible');
       renderPlaceCard(place);
+      persistMapsSession();
 
       const gen = ++placeCardGen;
       // Tenta enriquecer via /api/places/details quando houver placeId
@@ -2363,6 +2546,7 @@
         mapPickMarker.remove();
         mapPickMarker = null;
       }
+      persistMapsSession();
     }
 
     function clearMapPickMarker() {
@@ -2761,6 +2945,7 @@
         applySelectedRoute(selectedIndex < 0 ? 0 : selectedIndex);
         const selected = routes[selectedIndex < 0 ? 0 : selectedIndex];
         updateTravelModeEta(selected?.durationSeconds ?? route.durationSeconds);
+        persistMapsSession();
       } catch (err) {
         if (err.name === 'AbortError') return;
         console.error(err);
@@ -2989,6 +3174,7 @@
         placeMarker.remove();
         placeMarker = null;
       }
+      clearMapsSession();
       mainField.input.focus();
     });
 
@@ -3001,6 +3187,15 @@
     } else {
       void mainField.bootstrap();
     }
+
+    // Refresh / deep link: restaurar lugar, rota ou geocode da URL
+    const bootRestore = async () => {
+      if (!map.loaded()) {
+        await new Promise((resolve) => map.once('load', resolve));
+      }
+      await restoreMapsSessionOrUrl();
+    };
+    void bootRestore();
   </script>
 </body>
 </html>
