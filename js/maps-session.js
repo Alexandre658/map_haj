@@ -20,7 +20,8 @@ export function serializePlace(place) {
     types: Array.isArray(place.types) ? place.types.slice(0, 8) : undefined,
     rating: place.rating ?? undefined,
     userRatings: place.userRatings ?? undefined,
-    source: place.source ?? undefined
+    source: place.source ?? undefined,
+    precise: place.precise === true ? true : undefined
   };
 }
 

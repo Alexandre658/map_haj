@@ -2417,9 +2417,40 @@
     }
 
     /**
+     * Lugar “impreciso” (bairro/cidade) → pin pode ir ao fim da rota.
+     * Clique no mapa / morada exacta → pin fica no ponto escolhido.
+     */
+    function isPreciseMapPlace(place) {
+      if (!place) return false;
+      if (place.precise === true) return true;
+      const src = String(place.source || '');
+      if (src === 'map-click' || src === 'map' || src === 'url') return true;
+      const types = (place.types || []).map((t) => String(t).toLowerCase());
+      if (
+        types.some((t) =>
+          /street_address|premise|subpremise|establishment|point_of_interest|store|parking|intersection|route/.test(
+            t
+          )
+        )
+      ) {
+        return true;
+      }
+      if (
+        types.some((t) =>
+          /locality|sublocality|neighborhood|administrative_area|country|political|colloquial_area/.test(
+            t
+          )
+        )
+      ) {
+        return false;
+      }
+      return false;
+    }
+
+    /**
      * Places devolve centroides (ex.: bairro "Camama"); o routing termina
-     * na estrada mais próxima. Alinha os pins ao 1.º/último ponto da polyline
-     * (comportamento tipo Google) sem alterar a pesquisa / coords da API.
+     * na estrada mais próxima. Alinha pins só quando o lugar é impreciso —
+     * cliques no mapa / POIs exactos mantêm o ponto escolhido.
      * @param {object|null} route
      */
     function alignPinsToRouteGeometry(route) {
@@ -2434,18 +2465,36 @@
       const dest = destField?.getSelected?.();
 
       if (origin && hasValidCoords(origin) && !navigation?.active) {
-        setRoutePin('origin', {
-          ...origin,
-          lng: start[0],
-          lat: start[1]
-        });
+        // GPS / "sua localização": alinhar ao arranque da rota
+        const snapOrigin =
+          origin.placeId === 'my-location' ||
+          originIsMyLocation ||
+          !isPreciseMapPlace(origin);
+        if (snapOrigin) {
+          setRoutePin('origin', {
+            ...origin,
+            lng: start[0],
+            lat: start[1]
+          });
+        }
       }
       if (dest && hasValidCoords(dest)) {
-        setRoutePin('dest', {
-          ...dest,
-          lng: end[0],
-          lat: end[1]
+        if (isPreciseMapPlace(dest)) {
+          // Mantém o ponto clicado / morada exacta
+          setRoutePin('dest', dest);
+          return;
+        }
+        const gap = approxDistanceMeters(dest, {
+          lat: end[1],
+          lng: end[0]
         });
+        if (gap > 60) {
+          setRoutePin('dest', {
+            ...dest,
+            lng: end[0],
+            lat: end[1]
+          });
+        }
       }
     }
 
@@ -2558,12 +2607,19 @@
         if (gen !== placeCardGen) return;
         if (detailed) {
           const merged = mergePlace(place, detailed);
-          if (!hasValidCoords(merged) && hasValidCoords(place)) {
+          // Nunca perder o ponto clicado / coordenadas precisas
+          if (place.precise || place.source === 'map-click' || place.source === 'map') {
+            merged.lat = place.lat;
+            merged.lng = place.lng;
+            merged.precise = true;
+            merged.source = place.source || 'map-click';
+          } else if (!hasValidCoords(merged) && hasValidCoords(place)) {
             merged.lat = place.lat;
             merged.lng = place.lng;
           }
           selectedPlace = merged;
           renderPlaceCard(merged);
+          persistMapsSession();
         }
       } catch (err) {
         console.warn('[maphaj] place details:', err);
@@ -2639,13 +2695,8 @@
       if (!layerIds.length) return null;
       const feats = map.queryRenderedFeatures(point, { layers: layerIds });
       for (const f of feats) {
-        const coords =
-          f.geometry?.type === 'Point' ? f.geometry.coordinates : null;
-        const lngLat = coords
-          ? { lng: coords[0], lat: coords[1] }
-          : clickLngLat;
-        if (!lngLat) continue;
-        const place = placeFromMapFeature(f, lngLat);
+        // Sempre usar o ponto clicado — o geometry do label POI fica offset
+        const place = placeFromMapFeature(f, clickLngLat);
         if (place) return place;
       }
       return null;
@@ -2678,16 +2729,24 @@
       }
 
       const lngLat = e.lngLat;
+      const clickLat = lngLat.lat;
+      const clickLng = lngLat.lng;
       const gen = ++mapClickGen;
       if (mapClickAbort) mapClickAbort.abort();
       mapClickAbort = new AbortController();
 
       let place = queryMapPlaceFeature(e.point, {
-        lng: lngLat.lng,
-        lat: lngLat.lat
+        lng: clickLng,
+        lat: clickLat
       });
       if (place) {
-        place = { ...place, lat: lngLat.lat, lng: lngLat.lng };
+        place = {
+          ...place,
+          lat: clickLat,
+          lng: clickLng,
+          precise: true,
+          source: 'map-click'
+        };
       }
 
       placeCard.classList.add('visible', 'dir-context', 'loading');
@@ -2698,41 +2757,50 @@
 
       try {
         const fromApi = await placesClient.fromCoordinates({
-          lat: lngLat.lat,
-          lng: lngLat.lng,
+          lat: clickLat,
+          lng: clickLng,
           maxResults: 1,
           signal: mapClickAbort.signal
         });
         if (gen !== mapClickGen) return;
 
-        if (fromApi && hasValidCoords(fromApi)) {
-          place = place
-            ? mergePlace(
-                {
-                  ...place,
-                  lat: fromApi.lat ?? place.lat,
-                  lng: fromApi.lng ?? place.lng
-                },
-                fromApi
-              )
-            : fromApi;
+        if (fromApi) {
+          // Nome/morada da API, coordenadas = clique exacto
+          place = {
+            ...(place || {}),
+            ...fromApi,
+            name: fromApi.name || place?.name || 'Local no mapa',
+            address:
+              fromApi.address ||
+              place?.address ||
+              `${clickLat.toFixed(5)}, ${clickLng.toFixed(5)}`,
+            types: fromApi.types || place?.types,
+            placeId:
+              fromApi.placeId ||
+              place?.placeId ||
+              `map-coord-${clickLat.toFixed(5)}-${clickLng.toFixed(5)}`,
+            lat: clickLat,
+            lng: clickLng,
+            precise: true,
+            source: 'map-click'
+          };
         } else if (!place) {
           place = {
-            placeId: `map-coord-${lngLat.lat.toFixed(5)}-${lngLat.lng.toFixed(5)}`,
+            placeId: `map-coord-${clickLat.toFixed(5)}-${clickLng.toFixed(5)}`,
             name: 'Local no mapa',
-            address: `${lngLat.lat.toFixed(5)}, ${lngLat.lng.toFixed(5)}`,
-            lat: lngLat.lat,
-            lng: lngLat.lng,
+            address: `${clickLat.toFixed(5)}, ${clickLng.toFixed(5)}`,
+            lat: clickLat,
+            lng: clickLng,
             types: ['point_of_interest'],
-            source: 'map'
+            precise: true,
+            source: 'map-click'
           };
-        } else if (!place.address && fromApi?.address) {
-          place.address = fromApi.address;
+        } else {
+          place.lat = clickLat;
+          place.lng = clickLng;
+          place.precise = true;
+          place.source = 'map-click';
         }
-
-        // Manter o ponto clicado (precisão do toque)
-        place.lat = lngLat.lat;
-        place.lng = lngLat.lng;
 
         setMapPickPin(place);
         await showPlaceCard(place, { fromMap: true });
@@ -2740,13 +2808,25 @@
         if (err?.name === 'AbortError') return;
         console.warn('[maphaj] map click place:', err);
         if (gen !== mapClickGen) return;
-        if (place) {
-          setMapPickPin(place);
-          await showPlaceCard(place, { fromMap: true });
+        if (!place) {
+          place = {
+            placeId: `map-coord-${clickLat.toFixed(5)}-${clickLng.toFixed(5)}`,
+            name: 'Local no mapa',
+            address: `${clickLat.toFixed(5)}, ${clickLng.toFixed(5)}`,
+            lat: clickLat,
+            lng: clickLng,
+            types: ['point_of_interest'],
+            precise: true,
+            source: 'map-click'
+          };
         } else {
-          placeCard.classList.remove('loading');
-          hidePlaceCard();
+          place.lat = clickLat;
+          place.lng = clickLng;
+          place.precise = true;
+          place.source = 'map-click';
         }
+        setMapPickPin(place);
+        await showPlaceCard(place, { fromMap: true });
       }
     }
 
@@ -3158,8 +3238,15 @@
 
     document.getElementById('btnUseAsDest').addEventListener('click', () => {
       if (!selectedPlace || !directionsMode.classList.contains('active')) return;
-      destField.setPlace(selectedPlace);
-      setRoutePin('dest', selectedPlace);
+      const place = {
+        ...selectedPlace,
+        precise:
+          selectedPlace.precise === true ||
+          selectedPlace.source === 'map-click' ||
+          selectedPlace.source === 'map'
+      };
+      destField.setPlace(place);
+      setRoutePin('dest', place);
       clearMapPickMarker();
       placeCard.classList.remove('visible', 'loading');
       void maybeDrawRoute();
@@ -3168,8 +3255,15 @@
     document.getElementById('btnUseAsOrigin').addEventListener('click', () => {
       if (!selectedPlace || !directionsMode.classList.contains('active')) return;
       originIsMyLocation = false;
-      originField.setPlace(selectedPlace);
-      setRoutePin('origin', selectedPlace);
+      const place = {
+        ...selectedPlace,
+        precise:
+          selectedPlace.precise === true ||
+          selectedPlace.source === 'map-click' ||
+          selectedPlace.source === 'map'
+      };
+      originField.setPlace(place);
+      setRoutePin('origin', place);
       clearMapPickMarker();
       placeCard.classList.remove('visible', 'loading');
       void maybeDrawRoute();
