@@ -1192,6 +1192,13 @@ export class RouteLayer {
       ]) {
         if (this.map.getLayer(id)) this.map.moveLayer(id);
       }
+      if (this.map.getLayer('maphaj-od-pins')) {
+        try {
+          this.map.moveLayer('maphaj-od-pins');
+        } catch {
+          /* ignore */
+        }
+      }
       this._startFlowAnimation();
     });
 
@@ -1204,6 +1211,15 @@ export class RouteLayer {
       LAYER_FLOW
     ]) {
       if (this.map.getLayer(id)) this.map.moveLayer(id);
+    }
+
+    // Pins OD por cima da polyline
+    if (this.map.getLayer('maphaj-od-pins')) {
+      try {
+        this.map.moveLayer('maphaj-od-pins');
+      } catch {
+        /* ignore */
+      }
     }
 
     this._startFlowAnimation();

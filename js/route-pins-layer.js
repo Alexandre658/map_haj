@@ -87,8 +87,8 @@ export class RoutePinsLayer {
         this.map.addImage(id, data, { pixelRatio: 2 });
       }
     };
-    await load(IMG_ORIGIN, '/assets/markers/start-pin.png');
-    await load(IMG_DEST, '/assets/markers/dest-pin.png');
+    await load(IMG_ORIGIN, new URL('../assets/markers/start-pin.png', import.meta.url).href);
+    await load(IMG_DEST, new URL('../assets/markers/dest-pin.png', import.meta.url).href);
     this._imagesReady = true;
   }
 
@@ -110,10 +110,10 @@ export class RoutePinsLayer {
             'match',
             ['get', 'role'],
             'origin',
-            0.5,
+            0.62,
             'dest',
-            0.55,
-            0.5
+            0.68,
+            0.62
           ],
           'icon-anchor': [
             'match',
@@ -136,10 +136,11 @@ export class RoutePinsLayer {
             ['literal', [1.2, 0]]
           ],
           'text-max-width': 14,
-          'text-optional': false,
+          'text-optional': true,
           'text-allow-overlap': true,
           'text-ignore-placement': true,
-          'symbol-sort-key': ['get', 'z']
+          'symbol-sort-key': ['get', 'z'],
+          'symbol-z-order': 'source'
         },
         paint: {
           'text-color': '#111111',
@@ -150,6 +151,17 @@ export class RoutePinsLayer {
         }
       });
     }
+    this.bringToFront();
+  }
+
+  /** Garante que os pins ficam acima da polyline da rota. */
+  bringToFront() {
+    if (!this.map.getStyle() || !this.map.getLayer(LAYER)) return;
+    try {
+      this.map.moveLayer(LAYER);
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -159,13 +171,13 @@ export class RoutePinsLayer {
   setPin(kind, place) {
     if (kind === 'origin') this._origin = place && place.lat != null ? place : null;
     else this._dest = place && place.lat != null ? place : null;
-    this._paint();
+    void this.ensure();
   }
 
   clear() {
     this._origin = null;
     this._dest = null;
-    this._paint();
+    void this.ensure();
   }
 
   /** @returns {object|null} */
@@ -219,5 +231,6 @@ export class RoutePinsLayer {
     }
 
     src.setData({ type: 'FeatureCollection', features });
+    this.bringToFront();
   }
 }
