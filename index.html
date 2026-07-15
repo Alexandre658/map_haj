@@ -1730,21 +1730,46 @@
     async function recalculateNavigationRoute(pos) {
       if (navRecalcBusy || !navigation?.active) return;
       const dest = destField.getSelected();
-      if (!dest || !hasValidCoords(dest)) return;
+      if (!dest || !hasValidCoords(dest)) {
+        navigation.endReroute?.({ ok: false });
+        updateNavHud({
+          active: true,
+          offRoute: true,
+          instruction: 'Sem destino para recalcular',
+          type: 'continue',
+          distanceToManeuverText: '—',
+          remainingDistanceText: '—',
+          remainingDurationText: '—'
+        });
+        return;
+      }
 
       navRecalcBusy = true;
+      navigation.beginReroute?.();
+      updateNavHud({
+        active: true,
+        offRoute: true,
+        following: navigation.following,
+        instruction: 'A recalcular rota…',
+        type: 'continue',
+        distanceToManeuverText: '—',
+        remainingDistanceText: '—',
+        remainingDurationText: '—'
+      });
+
       try {
-        const origin = myLocationPlace(pos);
-        if (!origin) return;
+        const origin = myLocationPlace(pos) || myLocationPlace();
+        if (!origin) throw new Error('Sem posição GPS para recalcular');
+
         originIsMyLocation = true;
         originField.setPlace(origin);
-        setRoutePin('origin', origin);
+        // Em navegação o pin de origem fica escondido — não recriar
 
         const route = await directionsClient.getRoute(
           { lat: origin.lat, lng: origin.lng },
           { lat: dest.lat, lng: dest.lng },
           {
-            alternatives: true,
+            alternatives: false,
             mode: getApiTravelMode(travelMode)
           }
         );
@@ -1765,27 +1790,43 @@
                 }
               ];
 
+        const selected =
+          routes.find((r) => r.primary) || routes[0];
+        if (!selected?.coordinates?.length) {
+          throw new Error('Rota recalculada sem geometria');
+        }
+
         lastRoutes = routes;
-        const selectedIndex = Math.max(
-          0,
-          routes.findIndex((r) => r.primary)
-        );
-        const idx = selectedIndex < 0 ? 0 : selectedIndex;
-        routeLayer.setRoutes(routes, { selectedIndex: idx, fit: false });
-        applySelectedRoute(idx);
-        const selected = routes[idx];
+        routeLayer.setRoutes(routes, { selectedIndex: 0, fit: false });
+        routeLayer.setNavigationMode(true);
         await navigation.setRoute({
           coordinates: selected.coordinates,
           distanceMeters: selected.distanceMeters,
           durationSeconds: selected.durationSeconds,
           raw: selected.raw || route.raw
         });
+        navigation.endReroute?.({ ok: true });
+
+        updateNavHud({
+          active: true,
+          offRoute: false,
+          following: navigation.following,
+          instruction: 'Rota atualizada',
+          secondary: formatDistance(selected.distanceMeters),
+          type: 'continue',
+          distanceToManeuverText: '—',
+          remainingDistanceText: formatDistance(selected.distanceMeters),
+          remainingDurationText: formatDuration(selected.durationSeconds),
+          arrivalTimeText: ''
+        });
       } catch (err) {
         console.warn('[maphaj] nav recalc:', err);
+        navigation.endReroute?.({ ok: false });
         updateNavHud({
           active: true,
           offRoute: true,
           instruction: 'Não foi possível recalcular a rota',
+          secondary: err?.message || '',
           type: 'continue',
           distanceToManeuverText: '—',
           remainingDistanceText: '—',

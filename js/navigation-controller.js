@@ -162,9 +162,13 @@ export class NavigationController {
     this.onArrived = opts.onArrived || null;
     this.onProgress = opts.onProgress || null;
     this.onFollowChange = opts.onFollowChange || null;
-    this.offRouteMeters = opts.offRouteMeters ?? 45;
+    this.offRouteMeters = opts.offRouteMeters ?? 35;
     this.arriveMeters = opts.arriveMeters ?? 35;
     this.voiceEnabled = opts.voiceEnabled !== false;
+    /** Hits consecutivos GPS fora da polyline para disparar recalc */
+    this.offRouteHitsNeeded = opts.offRouteHitsNeeded ?? 2;
+    /** Segundos mínimos entre recalculos */
+    this.rerouteCooldownSec = opts.rerouteCooldownSec ?? 8;
 
     /** @type {number[][]|null} */
     this._coordinates = null;
@@ -175,6 +179,8 @@ export class NavigationController {
     this._active = false;
     this._watchId = null;
     this._offRouteHits = 0;
+    this._rerouting = false;
+    this._lastRerouteAt = 0;
     this._navMarker = null;
     this._lastPos = null;
     this._lastHeading = 0;
@@ -210,6 +216,7 @@ export class NavigationController {
     this._distanceMeters = route?.distanceMeters ?? null;
     this._durationSeconds = route?.durationSeconds ?? null;
     this._maneuvers = [];
+    this._offRouteHits = 0;
     if (!this._coordinates?.length) return;
 
     const gen = ++this._maneuverGen;
@@ -223,6 +230,23 @@ export class NavigationController {
     );
   }
 
+  /** Chamado pelo host enquanto o pedido de directions corre. */
+  beginReroute() {
+    this._rerouting = true;
+    this._offRouteHits = 0;
+  }
+
+  /** Chamado após sucesso/falha do recalculo. */
+  endReroute({ ok = true } = {}) {
+    this._rerouting = false;
+    this._offRouteHits = 0;
+    if (ok) this._lastRerouteAt = Date.now();
+  }
+
+  get rerouting() {
+    return this._rerouting;
+  }
+
   async start() {
     if (!this._coordinates || this._coordinates.length < 2) {
       throw new Error('Sem rota para navegar');
@@ -233,6 +257,8 @@ export class NavigationController {
     if (this._active) return;
     this._active = true;
     this._offRouteHits = 0;
+    this._rerouting = false;
+    this._lastRerouteAt = 0;
     this._following = true;
     this._userInteracting = false;
     this._lastSpokenKey = '';
@@ -278,6 +304,7 @@ export class NavigationController {
   stop() {
     this._active = false;
     this._offRouteHits = 0;
+    this._rerouting = false;
     this._following = true;
     this._userInteracting = false;
     this._programmaticCamera = false;
@@ -482,7 +509,9 @@ export class NavigationController {
     if (!nearest) return;
 
     const offRoute = nearest.distanceToLineMeters > this.offRouteMeters;
-    if (offRoute) {
+    if (this._rerouting) {
+      this._offRouteHits = 0;
+    } else if (offRoute) {
       this._offRouteHits += 1;
     } else {
       this._offRouteHits = 0;
@@ -538,8 +567,34 @@ export class NavigationController {
       return;
     }
 
-    if (this._offRouteHits >= 3) {
-      this._offRouteHits = 0;
+    if (this._rerouting) {
+      this.onUpdate?.({
+        active: true,
+        offRoute: true,
+        following: this._following,
+        instruction: 'A recalcular rota…',
+        type: 'continue',
+        distanceToManeuverText: '—',
+        remainingDistanceText: formatNavDistance(remainingDist),
+        remainingDurationText: formatDuration(remainingTime),
+        arrivalTimeText: formatArrivalClock(remainingTime),
+        remainingDistanceMeters: remainingDist,
+        remainingDurationSeconds: remainingTime,
+        heading,
+        position: { lat, lng },
+        speedMps: speed,
+        iconHtml: maneuverIconSvg('continue')
+      });
+      return;
+    }
+
+    const cooldownMs = (this.rerouteCooldownSec || 8) * 1000;
+    const cooledDown = Date.now() - this._lastRerouteAt >= cooldownMs;
+    if (
+      this._offRouteHits >= this.offRouteHitsNeeded &&
+      cooledDown
+    ) {
+      this.beginReroute();
       this.onUpdate?.({
         active: true,
         offRoute: true,
@@ -558,6 +613,29 @@ export class NavigationController {
         iconHtml: maneuverIconSvg('continue')
       });
       this.onOffRoute?.({ lat, lng });
+      return;
+    }
+
+    // Fora da rota mas ainda a acumular hits / em cooldown
+    if (offRoute) {
+      this.onUpdate?.({
+        active: true,
+        offRoute: true,
+        following: this._following,
+        instruction: 'Fora da rota',
+        secondary: 'A verificar…',
+        type: 'continue',
+        distanceToManeuverText: '—',
+        remainingDistanceText: formatNavDistance(remainingDist),
+        remainingDurationText: formatDuration(remainingTime),
+        arrivalTimeText: formatArrivalClock(remainingTime),
+        remainingDistanceMeters: remainingDist,
+        remainingDurationSeconds: remainingTime,
+        heading,
+        position: { lat, lng },
+        speedMps: speed,
+        iconHtml: maneuverIconSvg('continue')
+      });
       return;
     }
 
