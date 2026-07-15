@@ -79,7 +79,11 @@ async function planetTileJson(req, res) {
   }
 
   const host = req.headers.host || `localhost:${PORT}`;
-  const proto = 'http';
+  const xfProto = String(req.headers['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  const proto = xfProto === 'https' || xfProto === 'http' ? xfProto : 'http';
   const origin = `${proto}://${host}`;
   const out = {
     ...planetTileJsonCache,
@@ -140,7 +144,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`[maphaj] http://localhost:${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
+  console.log(`[maphaj] http://${HOST}:${PORT}`);
   console.log(`[maphaj] tiles via /tiles/ofm/* → ${UPSTREAM}`);
 });
