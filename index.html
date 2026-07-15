@@ -84,14 +84,136 @@
     .search-results .pin-ico {
       flex-shrink: 0; margin-top: 2px; color: #70757a;
     }
+    .search-results .pin-ico.history { color: #5f6368; }
+    .search-results .place-text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
     .search-results .place-name {
       font-weight: 500; display: block; line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .search-results .place-meta {
-      font-size: 12px; color: #70757a; margin-top: 2px; line-height: 1.35;
+      font-size: 12px; color: #70757a; line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      white-space: normal;
+    }
+    .search-results .place-dist {
+      flex-shrink: 0;
+      font-size: 12px;
+      font-weight: 500;
+      color: #1a73e8;
+      margin-top: 2px;
+      align-self: flex-start;
+    }
+    .search-section-title {
+      padding: 12px 16px 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #5f6368;
     }
     .search-results .hint {
       padding: 14px 16px; font-size: 13px; color: #70757a;
+    }
+    .search-edit-header {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 8px 0;
+    }
+    .search-edit-header button {
+      border: 0; background: transparent; cursor: pointer;
+      width: 40px; height: 40px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      color: #5f6368;
+    }
+    .search-edit-header button:hover { background: #f1f3f4; }
+    .search-edit-header span {
+      font-size: 16px; font-weight: 600; color: #202124;
+    }
+
+    /* Pesquisa em ecrã cheio (telemóvel) */
+    @media (max-width: 720px) {
+      body.search-editing .ui {
+        position: fixed;
+        inset: 0;
+        top: 0;
+        left: 0;
+        right: 0;
+        max-width: none;
+        z-index: 9;
+        background: #fff;
+        padding: 0;
+        gap: 0;
+        pointer-events: auto;
+      }
+      body.search-editing .search-mode {
+        border-radius: 0;
+        box-shadow: none;
+        height: 100%;
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      body.search-editing .search-edit-header {
+        display: flex;
+        flex-shrink: 0;
+      }
+      body.search-editing #mainSearch {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+      }
+      body.search-editing .search-mode .search-box {
+        margin: 0 12px 8px;
+        border: 1px solid #dadce0;
+        border-radius: 24px;
+        background: #f8f9fa;
+        min-height: 44px;
+        flex-shrink: 0;
+      }
+      body.search-editing .search-mode .icon {
+        display: none;
+      }
+      body.search-editing .search-results {
+        position: static;
+        left: auto;
+        right: auto;
+        top: auto;
+        max-height: none;
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 0;
+        box-shadow: none;
+        display: none;
+      }
+      body.search-editing .search-results.open {
+        display: block;
+      }
+      body.search-editing .search-results button {
+        padding: 14px 16px;
+        align-items: flex-start;
+      }
+      body.search-editing .place-card,
+      body.search-editing .map-settings-btn,
+      body.search-editing .map-settings-panel,
+      body.search-editing .maphaj-brand,
+      body.search-editing .maplibregl-ctrl-top-right,
+      body.search-editing .maplibregl-ctrl-bottom-left {
+        display: none !important;
+      }
     }
 
     /* Card do lugar seleccionado (detalhes) */
@@ -1426,6 +1548,12 @@
   <div class="ui">
     <!-- DEFAULT: pesquisa única estilo Google -->
     <div class="panel search-mode" id="searchMode">
+      <div class="search-edit-header" id="searchEditHeader">
+        <button type="button" id="btnCloseSearchEdit" title="Voltar" aria-label="Fechar pesquisa">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
+        <span>Para onde?</span>
+      </div>
       <div class="search" id="mainSearch">
         <div class="search-box">
           <span class="icon" aria-hidden="true">
@@ -3221,12 +3349,36 @@
     }
 
     // ── Pesquisa principal (Google-like) ──────────────────────────
+    function isMobileSearchUi() {
+      return window.matchMedia('(max-width: 720px)').matches;
+    }
+
+    function setSearchEditing(on) {
+      if (!on || !isMobileSearchUi()) {
+        document.body.classList.remove('search-editing');
+        return;
+      }
+      document.body.classList.add('search-editing');
+      setPlaceCardOpen(false);
+      setMapSettingsOpen(false);
+    }
+
     const mainField = bindPlaceSearchField({
       root: document.getElementById('mainSearch'),
       client: placesClient,
       config,
       getBias,
+      onFocus: () => setSearchEditing(true),
+      onBlur: () => {
+        setTimeout(() => {
+          const ae = document.activeElement;
+          if (ae === mainField.input) return;
+          if (ae?.closest?.('#mainSearch, #searchEditHeader')) return;
+          setSearchEditing(false);
+        }, 200);
+      },
       onSelected: (place) => {
+        setSearchEditing(false);
         setPlacePin(place);
         showPlaceCard(place);
         clearRouteDrawing();
@@ -3242,19 +3394,15 @@
       }
     });
 
-    // Enhance result rows with pin icon (Google style)
-    const resultsEl = document.querySelector('#mainSearch .search-results');
-    const obs = new MutationObserver(() => {
-      resultsEl.querySelectorAll('button').forEach((btn) => {
-        if (btn.querySelector('.pin-ico')) return;
-        const ico = document.createElement('span');
-        ico.className = 'pin-ico';
-        ico.innerHTML =
-          '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
-        btn.prepend(ico);
-      });
+    document.getElementById('btnCloseSearchEdit')?.addEventListener('click', () => {
+      mainField.closeResults?.();
+      mainField.input.blur();
+      setSearchEditing(false);
     });
-    obs.observe(resultsEl, { childList: true });
+
+    window.matchMedia('(max-width: 720px)').addEventListener('change', (e) => {
+      if (!e.matches) setSearchEditing(false);
+    });
 
     // ── Direções ──────────────────────────────────────────────────
     const originField = bindPlaceSearchField({
