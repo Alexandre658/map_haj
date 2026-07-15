@@ -424,6 +424,11 @@
     body.nav-active .maplibregl-ctrl-bottom-left {
       display: none !important;
     }
+    /* Direções (sheet em baixo): settings não sobrepõe o painel */
+    body.dir-active .map-settings-btn,
+    body.dir-active .map-settings-panel {
+      display: none !important;
+    }
     /* Durante navegação: só Me.png é a posição (esconde dot nativo MapLibre) */
     body.nav-active .maplibregl-user-location-dot,
     body.nav-active .maplibregl-user-location-show-heading .maplibregl-user-location-heading,
@@ -1778,6 +1783,10 @@
       }
     }
 
+    function setDirectionsUiActive(active) {
+      document.body.classList.toggle('dir-active', Boolean(active));
+    }
+
     function toggleDirectionsCollapsed() {
       if (!isMobileDirectionsUi()) return;
       setDirectionsCollapsed(!directionsMode.classList.contains('collapsed'));
@@ -2189,6 +2198,7 @@
         ) {
           searchMode.classList.add('hidden');
           directionsMode.classList.add('active');
+          setDirectionsUiActive(true);
           travelMode = session.travelMode || travelMode;
           travelModesEl
             ?.querySelectorAll('.travel-mode')
@@ -3225,6 +3235,8 @@
     async function enterDirectionsMode(destPlace) {
       searchMode.classList.add('hidden');
       directionsMode.classList.add('active');
+      setDirectionsUiActive(true);
+      setMapSettingsOpen(false);
       setDirectionsCollapsed(false);
       originIsMyLocation = true;
       directionsResumePlace = destPlace || selectedPlace || null;
@@ -3275,6 +3287,7 @@
     function exitDirectionsMode() {
       if (navigation?.active) navigation.stop();
       directionsMode.classList.remove('active', 'collapsed');
+      setDirectionsUiActive(false);
       searchMode.classList.remove('hidden');
       originIsMyLocation = false;
       routeGen += 1;
