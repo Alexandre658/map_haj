@@ -137,6 +137,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // SPA: URLs estilo Google Maps → index.html
+    // ex.: /maps/@-8.91,13.25,15z/data=!5m1!1e1?...
+    if (p === '/maps' || p.startsWith('/maps/')) {
+      serveStatic('/index.html', res);
+      return;
+    }
+
     serveStatic(p, res);
   } catch (err) {
     console.error('[maphaj]', err);
