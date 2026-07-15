@@ -191,13 +191,19 @@ export class NavigationController {
     this.onArrived = opts.onArrived || null;
     this.onProgress = opts.onProgress || null;
     this.onFollowChange = opts.onFollowChange || null;
-    this.offRouteMeters = opts.offRouteMeters ?? 35;
+    this.offRouteMeters = opts.offRouteMeters ?? 45;
     this.arriveMeters = opts.arriveMeters ?? 35;
     this.voiceEnabled = opts.voiceEnabled !== false;
     /** Hits consecutivos GPS fora da polyline para disparar recalc */
     this.offRouteHitsNeeded = opts.offRouteHitsNeeded ?? 2;
     /** Segundos mínimos entre recalculos */
     this.rerouteCooldownSec = opts.rerouteCooldownSec ?? 8;
+    /**
+     * Só cola o puck à estrada se estiveres mesmo na via e em movimento.
+     * Em casa (GPS no edifício) mostra a posição real — não a rua.
+     */
+    this.snapToRouteMeters = opts.snapToRouteMeters ?? 12;
+    this.snapMinSpeedMps = opts.snapMinSpeedMps ?? 1.2;
 
     /** @type {number[][]|null} */
     this._coordinates = null;
@@ -511,9 +517,9 @@ export class NavigationController {
     const t = this._target;
     const d = this._display;
 
-    // Avanço monotónico na rota (evita saltos para trás por GPS ruidoso)
+    // Posição: GPS real (casa) OU colado à rota (só se em movimento na via)
     let along = d.alongMeters;
-    if (!t.offRoute && this._coordinates) {
+    if (t.snapped && this._coordinates) {
       if (t.alongMeters >= along - 2) {
         along = lerp(along, t.alongMeters, posK);
       } else if (along - t.alongMeters > 40) {
@@ -529,6 +535,7 @@ export class NavigationController {
       d.lng = lerp(d.lng, t.lng, posK);
       d.lat = lerp(d.lat, t.lat, posK);
       d.alongMeters = t.alongMeters;
+      along = d.alongMeters;
     }
 
     d.heading = lerpAngle(d.heading, t.heading, headK);
@@ -883,9 +890,22 @@ export class NavigationController {
     );
     const heading = this._resolveHeading(routeBearing, gpsHeading, speed);
 
+    const distToRoute = nearest.distanceToLineMeters;
+    const accuracy =
+      pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy)
+        ? pos.coords.accuracy
+        : 25;
+
+    // Colar à rua só se: perto da via + em movimento + GPS razoável
+    // Em casa parado → posição GPS real (não "salta" para a estrada)
+    const shouldSnap =
+      distToRoute <= this.snapToRouteMeters &&
+      speed >= this.snapMinSpeedMps &&
+      accuracy <= 40;
+
     const onRouteLngLat = nearest.lngLat;
-    const displayLng = offRoute ? lng : onRouteLngLat[0];
-    const displayLat = offRoute ? lat : onRouteLngLat[1];
+    const displayLng = shouldSnap ? onRouteLngLat[0] : lng;
+    const displayLat = shouldSnap ? onRouteLngLat[1] : lat;
 
     if (!this._display) {
       this._display = {
@@ -904,6 +924,7 @@ export class NavigationController {
       alongMeters: nearest.alongMeters,
       totalMeters: nearest.totalMeters,
       speed,
+      snapped: shouldSnap,
       offRoute,
       offRoutePending: offRoute && this._offRouteHits < this.offRouteHitsNeeded,
       arrived: false
